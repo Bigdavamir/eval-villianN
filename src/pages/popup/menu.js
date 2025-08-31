@@ -1,4 +1,4 @@
-var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types"];
+var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures"];
 function updateToggle(on) {
 	if (typeof(on) !== "boolean") {
 		console.error("unexpected message type");
@@ -50,7 +50,7 @@ function createCheckBox(name, checked, subMenu) {
 }
 
 async function getSections() {
-	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats"]);
+	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats", "powerFeatures"]);
 	const autoOpen = [];
 	const onOff = [];
 	for (let k of all.formats) {
@@ -81,7 +81,12 @@ async function populateSubMenus() {
 		var where = document.getElementById(`${sub}-sub`);
 		for (let itr of res[sub]) {
 			if (typeof(itr.enabled) === 'boolean') {
-				const inpt = createCheckBox(itr.name, itr.enabled, sub);
+				const displayName = itr.pretty || itr.name;
+				const inpt = createCheckBox(displayName, itr.enabled, sub);
+				// The ID for the checkbox needs to be the internal name for saving, not the pretty name
+				if (itr.pretty) {
+					inpt.querySelector('input').id = itr.name;
+				}
 				where.appendChild(inpt);
 			}
 		}
@@ -155,7 +160,7 @@ function listener(ev) {
 		return
 	}
 
-	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types"].includes(id)) {
+	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types", "h1-powerfeatures"].includes(id)) {
 		let sub = id.substr(3);
 		let formats = document.getElementById(sub);
 		formats.classList.toggle('closed');

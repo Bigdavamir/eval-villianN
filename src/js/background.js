@@ -134,6 +134,18 @@ const defaultConfig = {
 			"pattern" : "evSourcer"
 		}
 	],
+	"powerFeatures": [
+		{
+			"name": "autoSourceFetch",
+			"pretty": "Auto-Source Fetch/XHR Responses",
+			"enabled": false
+		},
+		{
+			"name": "autoSourcePostMessage",
+			"pretty": "Auto-Source postMessage Data",
+			"enabled": false
+		}
+	],
 	"formats": [
 		{
 			"name"		: "title",
@@ -350,6 +362,8 @@ async function getConfigForRegister() {
 		}
 	}
 
+	config.powerFeatures = dbconf.powerFeatures;
+
 	for (const what of ["needles", "blacklist", "functions", "types"]) {
 		config[what] = config[what] = dbconf[what]
 			.filter(x => x.enabled)
@@ -470,6 +484,39 @@ function handleInstalled(details) {
 		register();
 	}
 }
+
+const EV_PERSISTENT_SOURCES_KEY = 'evalvillain_persistent_sources';
+
+browser.webNavigation.onBeforeNavigate.addListener((details) => {
+	// We are only interested in top-level frames, not iframes etc.
+	if (details.frameId !== 0) {
+		return;
+	}
+
+	browser.storage.local.get(EV_PERSISTENT_SOURCES_KEY, (result) => {
+		const persisted = result[EV_PERSISTENT_SOURCES_KEY] || [];
+		if (persisted.length === 0) {
+			return;
+		}
+
+		for (const source of persisted) {
+			// Check if the navigating URL contains a persisted source string.
+			if (details.url.includes(source)) {
+				console.log(
+					`%c[EV] Navigation Match Found!%c\n  - URL: %c${details.url}%c\n  - Matched Source: %c${source}`,
+					"color: red; font-weight: bold;",
+					"color: inherit;",
+					"color: #088; font-weight: bold;",
+					"color: inherit;",
+					"color: #088; font-weight: bold;"
+				);
+				// Break after the first match to avoid spamming the console for the same URL.
+				break;
+			}
+		}
+	});
+}, { url: [{ schemes: ["http", "https"] }] });
+
 
 browser.runtime.onMessage.addListener(handleMessage);
 browser.runtime.onInstalled.addListener(handleInstalled);
