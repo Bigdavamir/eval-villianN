@@ -1,3 +1,4 @@
+
 // This script is injected into the page context.
 (function() {
 	// CONFIG is set by the injector script on the window object.
@@ -6,6 +7,13 @@
 		console.error("[EV] Config not found. Aborting injection.");
 		return;
 	}
+/* Eval Villain just jams this rewriter function into the loading page, withNNSHD
+ * some JSON as CONFIG. Normally Firefox does this for you from the
+ * background.js file. But you could always copy paste this code anywhere you
+ * want. Such as into a proxie'd response or electron instramentation.
+ */
+const rewriter = function(CONFIG) {
+
 	// handled this way to preserve encoding...
 	function getAllQueryParams(search) {
 		return search.substr(search[0] == '?'? 1: 0)
@@ -1048,6 +1056,55 @@
 	}
 
 
+	// [VF-PATCH:NavigationSinkHooks] start
+	function hookNavigationSinks() {
+		try {
+			const logFmt = CONFIG.formats.interesting;
+			// Use a safe sourcer function to avoid errors if it's not defined
+			const sourcer = (CONFIG.sourcer && window[CONFIG.sourcer]) ? window[CONFIG.sourcer] : () => {};
+
+			// --- Hook location.href setter ---
+			// We must get the descriptor from the prototype
+			const hrefDescriptor = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+			if (hrefDescriptor && hrefDescriptor.set) {
+				const originalHrefSetter = hrefDescriptor.set;
+				Object.defineProperty(window.location, 'href', {
+					configurable: true, // Allow this to be undone if needed
+					enumerable: true,
+					get: hrefDescriptor.get, // Use original getter
+					set: function(url) {
+						real.log(`%c[EV] Navigation Sink (href): %c${url}`, logFmt.highlight, logFmt.default);
+						sourcer('location.href', url);
+						// Call the original setter on the location object
+						return originalHrefSetter.call(window.location, url);
+					}
+				});
+			} else {
+				 real.warn('[EV] Could not hook Location.prototype.href setter.');
+			}
+
+			// --- Hook location.assign ---
+			const originalAssign = window.location.assign;
+			window.location.assign = function(url) {
+				real.log(`%c[EV] Navigation Sink (assign): %c${url}`, logFmt.highlight, logFmt.default);
+				sourcer('location.assign', url);
+				return originalAssign.call(window.location, url);
+			};
+
+			// --- Hook location.replace ---
+			const originalReplace = window.location.replace;
+			window.location.replace = function(url) {
+				real.log(`%c[EV] Navigation Sink (replace): %c${url}`, logFmt.highlight, logFmt.default);
+				sourcer('location.replace', url);
+				return originalReplace.call(window.location, url);
+			};
+
+		} catch (e) {
+			real.error('[EV] CRITICAL: Failed to hook navigation sinks.', e);
+		}
+	}
+	// [VF-PATCH:NavigationSinkHooks] end
+
 	// [VF-PATCH:FrameworkSinkHooks] start
 	function hookFrameworks() {
 		// Note: The sourcer is now guaranteed to be on the window object by the PassiveInputListener patch.
@@ -1500,6 +1557,8 @@
 	// [VF-PATCH:FrameworkSinkHooks] start
 	hookFrameworks();
 	// [VF-PATCH:FrameworkSinkHooks] end
+
+	hookNavigationSinks();
 
 	// [VF-PATCH:IframeAndSWBridge] start
 	setupCommunicationBridges();
