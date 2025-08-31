@@ -1,4 +1,4 @@
-/* Eval Villain just jams this rewriter function into the loading page, withHREEEEF
+/* Eval Villain just jams this rewriter function into the loading page, with
  * some JSON as CONFIG. Normally Firefox does this for you from the
  * background.js file. But you could always copy paste this code anywhere you
  * want. Such as into a proxie'd response or electron instramentation.
@@ -689,20 +689,38 @@ const rewriter = function(CONFIG) {
 		const sourcer = (CONFIG.sourcerName && window[CONFIG.sourcerName]) ? window[CONFIG.sourcerName] : () => {};
 
 		// [VF-PATCH:NewSinks-ResponseSources]
-		if (evname === 'fetch') {
+		// [VF-PATCH:IntelligentSourcing]
+		const autoSourceFetch = CONFIG.powerFeatures.find(f => f.name === 'autoSourceFetch')?.enabled;
+		if (evname === 'fetch' && autoSourceFetch) {
 			const originalFetch = window.fetch;
+			const MAX_SIZE = 51200; // 50KB
+			const ALLOWED_TYPES = ['text/html', 'application/json', 'application/javascript', 'text/plain'];
+
 			window.fetch = new Proxy(originalFetch, {
 				apply: function(target, thisArg, args) {
 					EvalVillainHook(INTRBUNDLE, 'fetch', args);
 					const result = Reflect.apply(target, thisArg, args);
 					return result.then(response => {
+						const contentType = response.headers.get('content-type') || '';
+						const contentLength = response.headers.get('content-length');
+
+						if (contentLength && parseInt(contentLength, 10) > MAX_SIZE) {
+							return response; // Too large, don't hook body
+						}
+						if (!ALLOWED_TYPES.some(type => contentType.includes(type))) {
+							return response; // Not an interesting content type
+						}
+
 						const responseProxy = new Proxy(response, {
 							get: function(target, prop) {
 								const originalValue = target[prop];
-								if (['text', 'json', 'blob'].includes(prop) && typeof originalValue === 'function') {
+								if (['text', 'json'].includes(prop) && typeof originalValue === 'function') {
 									return function(...args) {
 										return originalValue.apply(target, args).then(body => {
-											sourcer('fetch.response', body);
+											const bodyStr = (typeof body === 'object') ? JSON.stringify(body) : String(body);
+											if (bodyStr.length <= MAX_SIZE && INTRBUNDLE.needles.matchAny(bodyStr)) {
+												sourcer('fetch.response', body);
+											}
 											return body;
 										});
 									};
@@ -716,7 +734,7 @@ const rewriter = function(CONFIG) {
 			});
 			return;
 		}
-		if (evname === 'value(XMLHttpRequest.open)') {
+		if (evname === 'value(XMLHttpRequest.open)' && autoSourceFetch) {
 			const originalOpen = XMLHttpRequest.prototype.open;
 			XMLHttpRequest.prototype.open = new Proxy(originalOpen, {
 				apply: function(target, thisArg, args) {
@@ -731,17 +749,27 @@ const rewriter = function(CONFIG) {
 			});
 			return;
 		}
+		// [VF-PATCH:IntelligentSourcing]
 		// [VF-PATCH:NewSinks-ResponseSources]
 
 		// [VF-PATCH:NewSinks-MessageAndSocketSources]
-		if (evname === 'window.addEventListener') {
+		// [VF-PATCH:IntelligentSourcing]
+		const autoSourcePostMessage = CONFIG.powerFeatures.find(f => f.name === 'autoSourcePostMessage')?.enabled;
+		const recentMessages = new Set();
+		if (evname === 'window.addEventListener' && autoSourcePostMessage) {
 			const originalAddEventListener = window.addEventListener;
 			window.addEventListener = new Proxy(originalAddEventListener, {
 				apply: function(target, thisArg, args) {
 					const [type, listener] = args;
 					if (type === 'message') {
 						const wrappedListener = function(event) {
-							sourcer('postMessage.data', event.data);
+							const msgData = (typeof event.data === 'object') ? JSON.stringify(event.data) : String(event.data);
+							const msgKey = msgData.substring(0, 256); // Use a substring as a key for deduplication
+							if (!recentMessages.has(msgKey)) {
+								sourcer('postMessage.data', event.data);
+								recentMessages.add(msgKey);
+								setTimeout(() => recentMessages.delete(msgKey), 5000); // Clear after 5 seconds
+							}
 							return listener.apply(this, arguments);
 						};
 						args[1] = wrappedListener;
@@ -752,7 +780,8 @@ const rewriter = function(CONFIG) {
 			});
 			return;
 		}
-		if (evname === 'WebSocket') {
+		// [VF-PATCH:IntelligentSourcing]
+		if (evname === 'WebSocket') { // WebSocket sourcing is not behind a power feature flag for now
 			const originalWebSocket = window.WebSocket;
 			window.WebSocket = new Proxy(originalWebSocket, {
 				construct: function(target, args) {
