@@ -1267,11 +1267,11 @@ const rewriter = function(CONFIG) {
 		applyEvalVillain(nm);
 	}
 
-	hookNavigationSinks();
-
 	// [VF-PATCH:FrameworkSinkHooks] start
 	hookFrameworks();
 	// [VF-PATCH:FrameworkSinkHooks] end
+
+	hookNavigationSinks();
 
 	// [VF-PATCH:IframeAndSWBridge] start
 	setupCommunicationBridges();
