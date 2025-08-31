@@ -11,9 +11,12 @@ function updateToggle(on) {
 	d.innerText = "Villain is " + (on ? "ON" : "OFF");
 }
 
-async function update_if_on() {
-	const on = await amIOn();
-	updateToggle(on);
+// Rewritten to use callbacks for Chrome compatibility.
+function update_if_on() {
+	amIOn().then(updateToggle).catch(err => {
+		console.error("Error getting toggle state:", err);
+		updateToggle(false);
+	});
 }
 
 function createCheckBox(name, checked, subMenu) {
@@ -49,54 +52,66 @@ function createCheckBox(name, checked, subMenu) {
 	return li;
 }
 
-async function getSections() {
-	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats"]);
-	const autoOpen = [];
-	const onOff = [];
-	for (let k of all.formats) {
-		autoOpen.push({
-			name: k.pretty,
-			pattern: k.name,
-			enabled: k.open,
-		});
-		onOff.push({
-			name: k.pretty,
-			pattern: k.name,
-			enabled: k.use,
-		});
-	}
-	all.autoOpen = autoOpen;
-	all.onOff = onOff;
-	delete all.formats;
-	return all;
-}
-
-async function populateSubMenus() {
-	const res = await getSections();
-	for (let sub of configList) {
-		if (!res[sub]) {
-			console.error("Could not get: " + sub);
+// Rewritten to use a callback instead of returning a Promise.
+function getSections(callback) {
+	browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats"], function(all) {
+		if (chrome.runtime.lastError) {
+			console.error("Error in getSections:", chrome.runtime.lastError);
+			return;
 		}
-
-		var where = document.getElementById(`${sub}-sub`);
-		for (let itr of res[sub]) {
-			if (typeof(itr.enabled) === 'boolean') {
-				const inpt = createCheckBox(itr.name, itr.enabled, sub);
-				where.appendChild(inpt);
+		const autoOpen = [];
+		const onOff = [];
+		if (all.formats) {
+			for (let k of all.formats) {
+				autoOpen.push({
+					name: k.pretty,
+					pattern: k.name,
+					enabled: k.open,
+				});
+				onOff.push({
+					name: k.pretty,
+					pattern: k.name,
+					enabled: k.use,
+				});
 			}
 		}
-
-		if (res[sub].length == 0) {
-			const em = document.createElement("em");
-			em.innerText = "Nothing Configured";
-			em.className = "configure";
-			em.onclick = () => goToConfig();
-			where.appendChild(em);
-		}
-	}
+		all.autoOpen = autoOpen;
+		all.onOff = onOff;
+		delete all.formats;
+		callback(all);
+	});
 }
 
-async function updateSubmenu(target) {
+// Rewritten to use a callback from getSections.
+function populateSubMenus() {
+	getSections(function(res) {
+		for (let sub of configList) {
+			if (!res[sub]) {
+				console.error("Could not get: " + sub);
+				continue; // Continue to next item in configList
+			}
+
+			var where = document.getElementById(`${sub}-sub`);
+			for (let itr of res[sub]) {
+				if (typeof(itr.enabled) === 'boolean') {
+					const inpt = createCheckBox(itr.name, itr.enabled, sub);
+					where.appendChild(inpt);
+				}
+			}
+
+			if (res[sub].length == 0) {
+				const em = document.createElement("em");
+				em.innerText = "Nothing Configured";
+				em.className = "configure";
+				em.onclick = () => goToConfig();
+				where.appendChild(em);
+			}
+		}
+	});
+}
+
+// Rewritten to use nested callbacks for Chrome compatibility.
+function updateSubmenu(target) {
 	let name = target.name;
 	const {checked, id} = target;
 	let chg = "enabled";
@@ -110,31 +125,51 @@ async function updateSubmenu(target) {
 		ident = "pretty";
 	}
 
-	if (["autoOpen", "onOff"].includes(name)) {
-		name = "formats";
-	}
+	let storageKey = (["autoOpen", "onOff"].includes(name)) ? "formats" : name;
 
-	const res = await browser.storage.local.get(name);
-	for (let k of res[name]) {
-		if (k[ident] === id && typeof(k[chg]) === 'boolean') {
-			k[chg] = checked;
-			break;
+	browser.storage.local.get([storageKey], function(res) {
+		if (chrome.runtime.lastError) {
+			console.error("Failed to get storage for", storageKey, ":", chrome.runtime.lastError);
+			return;
 		}
-	}
-	if (id === "User Sources") {
-		const {globals} = await browser.storage.local.get("globals");
-		globals.forEach(x => {
-			if (x.name == "sourcer")
-				x.enabled = checked;
-		});
-		res.globals = globals;
-	}
 
-	return browser.storage.local.set(res)
-		.then(updateBackground)
-		.then(update_if_on)
-		.catch(err => console.error("failed to get storage: " + err));
+		for (let k of res[storageKey]) {
+			if (k[ident] === id && typeof(k[chg]) === 'boolean') {
+				k[chg] = checked;
+				break;
+			}
+		}
+
+		const finalUpdate = function(dataToSet) {
+			browser.storage.local.set(dataToSet, function() {
+				if (chrome.runtime.lastError) {
+					console.error("Failed to set storage:", chrome.runtime.lastError);
+					return;
+				}
+				updateBackground().then(update_if_on).catch(err => console.error("Failed to update background:", err));
+			});
+		};
+
+		if (id === "User Sources") {
+			browser.storage.local.get(["globals"], function(globalsRes) {
+				if (chrome.runtime.lastError) {
+					console.error("Failed to get globals:", chrome.runtime.lastError);
+					finalUpdate(res); // Still try to update the original data
+					return;
+				}
+				globalsRes.globals.forEach(x => {
+					if (x.name == "sourcer")
+						x.enabled = checked;
+				});
+				res.globals = globalsRes.globals;
+				finalUpdate(res);
+			});
+		} else {
+			finalUpdate(res);
+		}
+	});
 }
+
 
 function listener(ev) {
 	let node = ev.target.nodeName;
@@ -169,9 +204,9 @@ function listener(ev) {
 }
 
 function goToConfig() {
+		// Using browser.* is fine here because of the polyfill.
 		let confUrl = browser.runtime.getURL("/pages/config/config.html");
-		let tab = browser.tabs.create({url:confUrl});
-		tab.then(() => window.close());
+		browser.tabs.create({url:confUrl}).then(() => window.close());
 		return;
 }
 

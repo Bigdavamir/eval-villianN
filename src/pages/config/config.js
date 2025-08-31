@@ -1,3 +1,4 @@
+// This file has been refactored to use callback-based storage APIs for Chrome compatibility.
 const configList = ["targets", "needles",  "blacklist", "functions", "globals"];
 const normalHeaders = ["enabled", "name", "pattern"];
 
@@ -19,8 +20,6 @@ function getTableData(tblName) {
 	})
 }
 
-// check entire table for updates that have not been saved
-// we get the whole table info from local storage, may as well check it all?
 function unsavedTable(tblName) {
 	function markSaved(v) {
 		const butt = document.getElementById(`save-${tblName}`);
@@ -33,7 +32,11 @@ function unsavedTable(tblName) {
 	}
 
 	function compareFormatData(saveData) {
-		for ([save, nm, value] of genFormatPairs(tblName, saveData)) {
+		if (!saveData || !saveData.formats) {
+			markSaved(false); // Can't compare, assume unsaved
+			return;
+		}
+		for (const [save, nm, value] of genFormatPairs(tblName, saveData)) {
 			const test = typeof(save[nm]) == "number"? Number(value): value;
 			if (save[nm] != test) {
 				markSaved(false);
@@ -44,6 +47,10 @@ function unsavedTable(tblName) {
 	}
 
 	function compareData(saveData) {
+		if (!saveData || !saveData[tblName]) {
+			markSaved(false); // Can't compare, assume unsaved
+			return;
+		}
 		const tblData = getTableData(tblName);
 		const saved = saveData[tblName];
 		if (saved.length !== tblData.length) {
@@ -60,17 +67,19 @@ function unsavedTable(tblName) {
 			}
 		}
 		markSaved(true);
-		return;
 	}
 
-	if (["formats","limits"].includes(tblName)) {
-		// limits has name limits but uses storage formats
-		browser.storage.local.get("formats")
-			.then(compareFormatData);
-	} else {
-		browser.storage.local.get(tblName)
-			.then(compareData);
-	}
+	const key = ["formats","limits"].includes(tblName) ? "formats" : tblName;
+	const callback = ["formats","limits"].includes(tblName) ? compareFormatData : compareData;
+
+	browser.storage.local.get([key], function(result) {
+		if (chrome.runtime.lastError) {
+			console.error("Error in unsavedTable:", chrome.runtime.lastError);
+			markSaved(false);
+		} else {
+			callback(result);
+		}
+	});
 }
 
 function createField(name, value, disabled=false) {
@@ -108,7 +117,6 @@ function defAddRow(tblName, ex, focus=false) {
 		ecks.className = "ecks";
 		delRow.appendChild(ecks);
 		ecks.onclick = function() {
-			// remove inputs from errors, if they exist
 			for (const input of row.getElementsByTagName("input")) {
 				if (input.type === "text") {
 					removeFromErrorArray(input, tblName);
@@ -166,26 +174,25 @@ function defAddRow(tblName, ex, focus=false) {
 	}
 }
 
-
 function rowFromName(tbl, rowName) {
-	const nodes = tbl.querySelector(`input[name=${rowName}]`)
+	const nodes = tbl.querySelector(`input[name='${rowName}']`)
 		?.parentElement
-		.parentElement
-		.parentElement
+		?.parentElement
 		.querySelectorAll("input");
 	return nodes? Array.from(nodes): undefined;
 }
 
 function *genFormatPairs(tblName, res) {
+	if (!res || !res.formats) return;
 	const saved = res.formats;
 	const tbl = document.getElementById(`${tblName}-form`);
 	if (!tbl) {
-		throw "Uknown table name";
+		throw "Unknown table name";
 	}
 
 	for (const save of saved) {
 		const cols = rowFromName(tbl, save.name);
-		if (cols && cols.shift().name == save.name) {
+		if (cols && cols.length > 0 && cols[0].name === save.name) {
 			for (const val of cols) {
 				const {name, value} = val;
 				yield [save, name, value];
@@ -194,20 +201,29 @@ function *genFormatPairs(tblName, res) {
 	}
 }
 
-async function formatsSave(tblName) {
-	const res = await browser.storage.local.get("formats");
-
-	for ([save, nm, value] of genFormatPairs(tblName, res)) {
-		if (typeof(save[nm]) == "number") {
-			save[nm] = Number(value);
-		} else {
-			save[nm] = value;
+function formatsSave(tblName) {
+	browser.storage.local.get(["formats"], function(res) {
+		if (chrome.runtime.lastError) {
+			console.error("Error in formatsSave get:", chrome.runtime.lastError);
+			return;
 		}
-	}
 
-	browser.storage.local.set(res)
-		.then(updateBackground)
-		.then(() => unsavedTable(tblName));
+		for (const [save, nm, value] of genFormatPairs(tblName, res)) {
+			if (typeof(save[nm]) == "number") {
+				save[nm] = Number(value);
+			} else {
+				save[nm] = value;
+			}
+		}
+
+		browser.storage.local.set(res, function() {
+			if (chrome.runtime.lastError) {
+				console.error("Error in formatsSave set:", chrome.runtime.lastError);
+				return;
+			}
+			updateBackground().then(() => unsavedTable(tblName));
+		});
+	});
 }
 
 function getDefElements(form) {
@@ -226,7 +242,7 @@ function getDefElements(form) {
 	return all;
 }
 
-async function saveTable(tblName) {
+function saveTable(tblName) {
 	if (!validateTable(tblName)) {
 		return;
 	}
@@ -235,8 +251,13 @@ async function saveTable(tblName) {
 	const data = {};
 	data[tblName] = getDefElements(tbl);
 
-	await browser.storage.local.set(data);
-	return updateBackground();
+	browser.storage.local.set(data, function() {
+		if (chrome.runtime.lastError) {
+			console.error("Error in saveTable:", chrome.runtime.lastError);
+			return;
+		}
+		updateBackground().then(() => unsavedTable(tblName));
+	});
 }
 
 function onLoad() {
@@ -246,9 +267,11 @@ function onLoad() {
 	}
 
 	function writeDOM(res) {
+		if (!res) return;
 		for (const sub of configList) {
 			if (!res[sub]) {
 				console.error("Could not get: " + sub);
+				continue;
 			}
 
 			for (const itr of res[sub]) {
@@ -257,11 +280,10 @@ function onLoad() {
 		}
 		for (const sub of configList) {
 			validateTable(sub);
-			unsavedTable(sub); // really should never change anything
+			unsavedTable(sub);
 		}
 	}
 
-	// set onclick events to default buttons
 	for (const i of configList) {
 		if (i != "globals") {
 			document.getElementById(`add-${i}`).onclick = function() {
@@ -270,30 +292,25 @@ function onLoad() {
 			}
 		}
 		document.getElementById(`save-${i}`).onclick = function() {
-			saveTable(i)
-				.then(() => unsavedTable(i)); // fix formating, should clear
+			saveTable(i);
 		}
 	}
 
-	// TODO await and simplify
-	const result = browser.storage.local.get(configList);
-	result.then(
-		writeDOM,
-		err => console.error("failed to get storage: " + err)
-	);
-	// TODO better DB in future, sipler code
-	populateFormats();
+	browser.storage.local.get(configList, function(result) {
+		if (chrome.runtime.lastError) {
+			console.error("failed to get storage: " + chrome.runtime.lastError);
+		} else {
+			writeDOM(result);
+		}
+	});
 
+	populateFormats();
 	setCopyHandlers();
 }
 
-// formats and limits are different table types, so handled seperatly
-async function populateFormats() {
-	// class for each column of input
-
+function populateFormats() {
 	function createInptCol(name, value, xl, disabled=false) {
 		const col = document.createElement("div");
-		// col.className = "col-md";
 		col.className = xl? "col-xl" : "col-md";
 		const field = createField(name, value, disabled);
 		col.appendChild(field);
@@ -317,39 +334,40 @@ async function populateFormats() {
 		return row;
 	}
 
-	// set save button
 	document.getElementById("save-formats").onclick = () => formatsSave("formats");
 	document.getElementById("test-formats").onclick = colorTest;
 	document.getElementById("save-limits").onclick = () => formatsSave("limits");
 
-	const {formats} = await browser.storage.local.get("formats");
-	if (!formats) {
-		console.err("could not get color formats from storage");
-		return false;
-	}
-
-	const fmtTbl = document.getElementById("formats-form");
-	const limitTbl = document.getElementById("limits-form");
-	formats.forEach(i => {
-		if (i.open !== null) {
-			fmtTbl.appendChild(createFmtRow(i));
+	browser.storage.local.get(["formats"], function(result) {
+		if (chrome.runtime.lastError || !result || !result.formats) {
+			console.error("could not get color formats from storage:", chrome.runtime.lastError);
+			return;
 		}
 
-		if (i.limit) {
-			limitTbl.appendChild(createLimitRow(i));
-		}
-
+		const fmtTbl = document.getElementById("formats-form");
+		const limitTbl = document.getElementById("limits-form");
+		result.formats.forEach(i => {
+			if (i.open !== null) {
+				fmtTbl.appendChild(createFmtRow(i));
+			}
+			if (i.limit) {
+				limitTbl.appendChild(createLimitRow(i));
+			}
+		});
 	});
 }
 
-// Should reflect switcheroo.js printing
 function colorTest() {
-	browser.storage.local.get("formats").then(x => {
-		for (const i of x.formats) {
+	browser.storage.local.get(["formats"], function(result) {
+		if (chrome.runtime.lastError || !result.formats) {
+			console.error("Error getting formats for color test:", chrome.runtime.lastError);
+			return;
+		}
+		for (const i of result.formats) {
 			console.log("[%s] %cDefault %chighlighted",
 				i.name, i.default, i.highlight
 			);
-		  }
+		}
 	});
 }
 
@@ -357,7 +375,6 @@ async function getConfig() {
 	const conf = await browser.runtime.sendMessage("getScriptInfo");
 	return JSON.stringify(conf[0], null, 2);
 }
-
 
 async function getInjection() {
 	const conf = await getConfig();
@@ -371,14 +388,12 @@ function clipit(x, nm) {
 }
 
 function setCopyHandlers() {
-	// sets up copy config and copy injection buttons
 	document.getElementById('copyconfig').onclick = function() {
 		getConfig().then(x => clipit(x, "Config"));
 	}
 	document.getElementById('copyinjec').onclick = function() {
 		getInjection().then(x => clipit(x, "Injection"));
 	}
-
 }
 
 self.addEventListener('load', onLoad);

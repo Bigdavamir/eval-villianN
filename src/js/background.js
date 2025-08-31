@@ -245,26 +245,52 @@ const defaultConfig = {
 	]
 }
 
-function getAllConf() {
-	return browser.storage.local.get(Object.keys(defaultConfig)).catch(console.error);
+// Rewritten to use callbacks for Chrome compatibility.
+function getAllConf(callback) {
+	browser.storage.local.get(Object.keys(defaultConfig), function(result) {
+		if (chrome.runtime.lastError) {
+			console.error("Error in getAllConf:", chrome.runtime.lastError);
+			callback(null); // Pass null on error
+		} else {
+			callback(result);
+		}
+	});
 }
 
-async function getAllConfValidated() {
-	let dbconf = await getAllConf();
-	for (let i = 0; i < 2; i++) { // retry loop
-		let success = true;
-		for (const i of Object.keys(defaultConfig)) {
-			if (dbconf[i] === undefined || !Array.isArray(dbconf[i])) {
-				await checkStorage();
-				dbconf = await getAllConf();
-				success = false;
+// Rewritten to use callbacks for Chrome compatibility.
+function getAllConfValidated(callback) {
+	let attempts = 0;
+	const maxAttempts = 2;
+
+	function tryValidation() {
+		getAllConf(function(dbconf) {
+			if (!dbconf) {
+				callback(null); // Propagate error
+				return;
 			}
-		}
-		if (success) {
-			return dbconf;
-		}
+
+			let success = true;
+			for (const key of Object.keys(defaultConfig)) {
+				if (dbconf[key] === undefined || !Array.isArray(dbconf[key])) {
+					success = false;
+					break;
+				}
+			}
+
+			if (success) {
+				callback(dbconf);
+			} else {
+				attempts++;
+				if (attempts < maxAttempts) {
+					checkStorage(tryValidation); // Pass tryValidation as the callback
+				} else {
+					console.error("Failed to get validated config after multiple attempts.");
+					callback(null);
+				}
+			}
+		});
 	}
-	return null;
+	tryValidation();
 }
 
 function debugLog() {
@@ -272,51 +298,76 @@ function debugLog() {
 	console.log(...arguments);
 }
 
-async function checkStorage() {
-	const dbconf = await getAllConf();
-
-	function updateIt(what) {
-		const k = {};
-		k[what] = defaultConfig[what];
-		return browser.storage.local.set(k)
-			.then(() => console.log(`updated ${what}`));
-	}
-
-	for (const iter in defaultConfig) {
-		if (dbconf[iter] === undefined) {
-			updateIt(iter); // DNE, add it
-		} else if (iter === "formats") {
-			const dbf = dbconf.formats;
-			if (!Array.isArray(dbf)) {
-				updateIt(iter);
-				continue;
-			}
-			// if defaultConfig has changed since install, we update
-			const defFormats = defaultConfig.formats;
-			const currentNames = dbf.map(x => x.name);
-			const defNames = defFormats.map(x => x.name);
-			if (!arraysEqual(currentNames, defNames)) {
-				updateIt(iter);
-			}
-
-			// if formats fields change, update it
-			dbf.some((obj, i) => {
-				// TODO: improve DB representation of formats
-				const def = defFormats[i];
-				if (obj.name != def.name) {
-					updateIt(iter);
-					return true;
-				}
-				const s1 = Object.keys(obj).join();
-				const s2 = Object.keys(def).join();
-				if (s1 != s2) {
-					updateIt(iter);
-					return true;
-				}
-				return false;
-			})
+// Rewritten to use callbacks for Chrome compatibility.
+function checkStorage(callback) {
+	getAllConf(function(dbconf) {
+		if (!dbconf) {
+			if (callback) callback();
+			return; // Error handled in getAllConf
 		}
-	}
+
+		let updatesPending = 0;
+		let updatesCompleted = 0;
+
+		function onUpdateComplete() {
+			updatesCompleted++;
+			if (updatesCompleted === updatesPending && callback) {
+				callback();
+			}
+		}
+
+		function updateIt(what) {
+			updatesPending++;
+			const k = {};
+			k[what] = defaultConfig[what];
+			browser.storage.local.set(k, function() {
+				if (chrome.runtime.lastError) {
+					console.error(`Failed to update ${what}:`, chrome.runtime.lastError);
+				} else {
+					console.log(`updated ${what}`);
+				}
+				onUpdateComplete();
+			});
+		}
+
+		for (const iter in defaultConfig) {
+			if (dbconf[iter] === undefined) {
+				updateIt(iter); // DNE, add it
+			} else if (iter === "formats") {
+				const dbf = dbconf.formats;
+				if (!Array.isArray(dbf)) {
+					updateIt(iter);
+					continue;
+				}
+				const defFormats = defaultConfig.formats;
+				const currentNames = dbf.map(x => x.name);
+				const defNames = defFormats.map(x => x.name);
+				if (!arraysEqual(currentNames, defNames)) {
+					updateIt(iter);
+					continue; // Prevent further checks on this iteration
+				}
+
+				dbf.some((obj, i) => {
+					const def = defFormats[i];
+					if (obj.name != def.name) {
+						updateIt(iter);
+						return true;
+					}
+					const s1 = Object.keys(obj).join();
+					const s2 = Object.keys(def).join();
+					if (s1 != s2) {
+						updateIt(iter);
+						return true;
+					}
+					return false;
+				});
+			}
+		}
+
+		if (updatesPending === 0 && callback) {
+			callback();
+		}
+	});
 }
 
 function arraysEqual(a, b) {
@@ -331,90 +382,112 @@ function arraysEqual(a, b) {
 	return true;
 }
 
-async function getConfigForRegister() {
-	const dbconf = await getAllConfValidated();
-		// .then(worked);
-
-	const config = {};
-	config.formats = {};
-	for (const i of dbconf.formats) {
-		const tmp = Object.assign({}, i);
-		config.formats[tmp.name] = tmp;
-		delete tmp.name;
-	}
-
-	// globals
-	for (const i of dbconf.globals) {
-		if (i.enabled) {
-			config[i.name] = i.pattern;
+// Rewritten to use a callback instead of returning a Promise.
+function getConfigForRegister(callback) {
+	getAllConfValidated(function(dbconf) {
+		if (!dbconf) {
+			callback(null); // Propagate error
+			return;
 		}
-	}
 
-	for (const what of ["needles", "blacklist", "functions", "types"]) {
-		config[what] = config[what] = dbconf[what]
-			.filter(x => x.enabled)
-			.map(x => x.pattern);
-	}
+		const config = {};
+		config.formats = {};
+		for (const i of dbconf.formats) {
+			const tmp = Object.assign({}, i);
+			config.formats[tmp.name] = tmp;
+			delete tmp.name;
+		}
 
-	// target stuff {
-	const match = [];
-	const targRegex = /^(https?|wss?|file|ftp|\*):\/\/(\*|\*\.[^|)}>#]+|[^|)}>#]+)\/.*$/;
-	for (const i of dbconf.targets) {
-		if (i.enabled) {
-			if (targRegex.test(i.pattern)) {
-				match.push(i.pattern);
-			} else {
-				throw `Error on Target ${i.name}: ${i.pattern} must match: ${targRegex}`;
+		// globals
+		for (const i of dbconf.globals) {
+			if (i.enabled) {
+				config[i.name] = i.pattern;
 			}
 		}
-	}
 
-	// no targets enabled means do all
-	if (match.length === 0) {
-		match.push("<all_urls>");
-	}
-	debugLog("[EV DEBUG] matches: %s", match);
-	return [config, match];
+		for (const what of ["needles", "blacklist", "functions", "types"]) {
+			config[what] = dbconf[what]
+				.filter(x => x.enabled)
+				.map(x => x.pattern);
+		}
+
+		// target stuff
+		const match = [];
+		const targRegex = /^(https?|wss?|file|ftp|\*):\/\/(\*|\*\.[^|)}>#]+|[^|)}>#]+)\/.*$/;
+		for (const i of dbconf.targets) {
+			if (i.enabled) {
+				if (targRegex.test(i.pattern)) {
+					match.push(i.pattern);
+				} else {
+					// NOTE: This throw will be unhandled in a callback.
+					// Consider passing an error to the callback instead.
+					console.error(`Error on Target ${i.name}: ${i.pattern} must match: ${targRegex}`);
+				}
+			}
+		}
+
+		if (match.length === 0) {
+			match.push("<all_urls>");
+		}
+		debugLog("[EV DEBUG] matches: %s", match);
+		callback([config, match]);
+	});
 }
 
 
 /**
 * Registers the content script with the current config
 **/
-async function register() {
-	if (this.unreg != null) {
-		// content script is registered already, so remove it first don't worry
-		// about the icon though, if we fail something else will change it to off
-		removeScript(false);
-	}
-	const [config, match] = await getConfigForRegister();
+// Rewritten to use callbacks for Chrome compatibility.
+function register() {
+	return new Promise((resolve, reject) => {
+		if (this.unreg != null) {
+			removeScript(false);
+		}
 
-	// anything to register?
-	if (config.functions.length === 0) {
-		removeScript();
-		res(false);
-		return;
-	}
+		getConfigForRegister(function(result) {
+			if (!result) {
+				removeScript();
+				resolve(false); // Resolve with false on failure
+				return;
+			}
+			const [config, match] = result;
 
-	const code = `config = ${JSON.stringify(config)};`;
+			if (config.functions.length === 0) {
+				removeScript();
+				resolve(false);
+				return;
+			}
 
+			const code = `config = ${JSON.stringify(config)};`;
 
-	// firefox >=59, not supported in chrome...
-	this.unreg = await browser.contentScripts.register({
-		matches: match,
-		js: [
-			{code: code}, 					// contains configuration for rewriter
-			{file: "/js/rewriter.js"},		// Has actual code that gets injected into the page
-			{file: "/js/switcheroo.js"}		// cause the injection
-		],
-		runAt: "document_start",
-		allFrames: true
+			// CRITICAL NOTE FOR CHROME PORT:
+			// browser.contentScripts.register is a Firefox-specific API.
+			// This will NOT work in Chrome. Chrome requires content scripts to be
+			// declared in manifest.json or uses the chrome.scripting API in Manifest V3.
+			// The simple `window.browser = chrome;` polyfill is insufficient for this.
+			browser.contentScripts.register({
+				matches: match,
+				js: [
+					{code: code},
+					{file: "/js/rewriter.js"},
+					{file: "/js/switcheroo.js"}
+				],
+				runAt: "document_start",
+				allFrames: true
+			}).then(reg => {
+				this.unreg = reg;
+				browser.browserAction.setTitle({title: "EvalVillain: ON"});
+				browser.browserAction.setIcon({path: "/icons/on_48.png"});
+				debugLog("[EV_DEBUG] %cInjection Script registered", "color:#088;");
+				resolve(true);
+			}).catch(err => {
+				console.error("Failed to register content script:", err);
+				removeScript();
+				reject(err);
+			});
+		});
 	});
-
-	browser.browserAction.setTitle({title: "EvalVillain: ON"});
-	browser.browserAction.setIcon({path: "/icons/on_48.png"});
-	debugLog("[EV_DEBUG] %cInjection Script registered", "color:#088;")
-	return true;
 }
 
 function removeScript(icon=true) {
