@@ -1253,4 +1253,37 @@ const rewriter = function(CONFIG) {
 		document.location.origin,
 		CONFIG.formats.interesting.default
 	);
+
+	// [VF-PATCH:FrameworkSinkHooks-LocationMonitor]
+	// This patch passively monitors for changes to window.location.href, which cannot be
+	// hooked directly. It uses a combination of event listeners and polling.
+	try {
+		(function() {
+			let lastHref = location.href;
+
+			function checkLocation() {
+				// Use a try-catch because location.href can throw a security error on
+				// some browser states (e.g., during unload).
+				try {
+					const currentHref = location.href;
+					if (currentHref !== lastHref) {
+						lastHref = currentHref;
+						EvalVillainHook(INTRBUNDLE, 'PassiveLocationChange', [currentHref]);
+					}
+				} catch (e) {
+					// Ignore errors, as they are expected in some edge cases.
+				}
+			}
+
+			// Check for changes on a regular interval as a fallback.
+			setInterval(checkLocation, 200);
+
+			// Also check on specific navigation-related events for faster detection.
+			window.addEventListener('popstate', checkLocation, { passive: true });
+			window.addEventListener('hashchange', checkLocation, { passive: true });
+		})();
+	} catch (e) {
+		real.error("[EV] Error during LocationMonitor initialization:", e);
+	}
+	// [VF-PATCH:FrameworkSinkHooks-LocationMonitor]
 };
