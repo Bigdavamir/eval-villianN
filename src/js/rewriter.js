@@ -731,11 +731,145 @@ const rewriter = function(CONFIG) {
 	// [VF-PATCH:FrameworkSinkHooks] start
 	function hookFrameworks() {
 		const sourcerName = CONFIG.sourcerName;
-		if (!sourcerName || !window[sourcerName]) {
-			return;
-		}
-		const sourcer = window[sourcerName];
+		const sourcer = (sourcerName && window[sourcerName]) ? window[sourcerName] : () => {};
 
+		// [VF-PATCH:FrameworkSinkHooks-ShadowRoot]
+		try {
+			if (typeof ShadowRoot !== 'undefined' && ShadowRoot.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'innerHTML');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(ShadowRoot.innerHTML)';
+					Object.defineProperty(ShadowRoot.prototype, 'innerHTML', { set: new Proxy(originalSetter, proxy) });
+				}
+			}
+		} catch (e) { real.warn('[EV] Failed to hook ShadowRoot.prototype.innerHTML:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-insertAdjacentHTML]
+		try {
+			if (Element.prototype.insertAdjacentHTML) {
+				const originalMethod = Element.prototype.insertAdjacentHTML;
+				const proxy = new evProxy(INTRBUNDLE);
+				proxy.evname = 'Element.insertAdjacentHTML';
+				Element.prototype.insertAdjacentHTML = new Proxy(originalMethod, proxy);
+			}
+		} catch (e) { real.warn('[EV] Failed to hook Element.prototype.insertAdjacentHTML:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-RangeContext]
+		try {
+			if (Range.prototype.createContextualFragment) {
+				const originalMethod = Range.prototype.createContextualFragment;
+				const proxy = new evProxy(INTRBUNDLE);
+				proxy.evname = 'Range.createContextualFragment';
+				Range.prototype.createContextualFragment = new Proxy(originalMethod, proxy);
+			}
+		} catch (e) { real.warn('[EV] Failed to hook Range.prototype.createContextualFragment:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-DOMParser]
+		try {
+			if (DOMParser.prototype.parseFromString) {
+				const originalMethod = DOMParser.prototype.parseFromString;
+				const proxy = {
+					apply: function(target, thisArg, args) {
+						const [string, type] = args;
+						if (type === 'text/html') {
+							EvalVillainHook(INTRBUNDLE, 'DOMParser.parseFromString', [string]);
+						}
+						return Reflect.apply(target, thisArg, args);
+					}
+				};
+				DOMParser.prototype.parseFromString = new Proxy(originalMethod, proxy);
+			}
+		} catch (e) { real.warn('[EV] Failed to hook DOMParser.prototype.parseFromString:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-HTMLDocumentCreate]
+		try {
+			if (Document.prototype.implementation && Document.prototype.implementation.createHTMLDocument) {
+				const originalMethod = Document.prototype.implementation.createHTMLDocument;
+				const proxy = new evProxy(INTRBUNDLE);
+				proxy.evname = 'Document.implementation.createHTMLDocument';
+				Document.prototype.implementation.createHTMLDocument = new Proxy(originalMethod, proxy);
+			}
+		} catch (e) { real.warn('[EV] Failed to hook Document.implementation.createHTMLDocument:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-iframeSrcdoc]
+		try {
+			if (typeof HTMLIFrameElement !== 'undefined' && HTMLIFrameElement.prototype) {
+				 const descriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc');
+				 if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(HTMLIFrameElement.srcdoc)';
+					Object.defineProperty(HTMLIFrameElement.prototype, 'srcdoc', { set: new Proxy(originalSetter, proxy) });
+				 }
+			}
+		} catch(e) { real.warn('[EV] Failed to hook HTMLIFrameElement.prototype.srcdoc:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-outerHTML]
+		try {
+			if (typeof Element !== 'undefined' && Element.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(Element.outerHTML)';
+					Object.defineProperty(Element.prototype, 'outerHTML', { set: new Proxy(originalSetter, proxy) });
+				}
+			}
+		} catch (e) { real.warn('[EV] Failed to hook Element.prototype.outerHTML:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-srcHrefJS]
+		const hookJavascriptUrl = (proto, prop) => {
+			try {
+				if (typeof proto !== 'undefined' && proto.prototype) {
+					const descriptor = Object.getOwnPropertyDescriptor(proto.prototype, prop);
+					if (descriptor && descriptor.set) {
+						const originalSetter = descriptor.set;
+						const proxy = {
+							apply: function(target, thisArg, args) {
+								const value = args[0];
+								if (typeof value === 'string' && value.trim().toLowerCase().startsWith('javascript:')) {
+									EvalVillainHook(INTRBUNDLE, `set(${proto.name}.${prop})`, [value]);
+								}
+								return Reflect.apply(target, thisArg, args);
+							}
+						};
+						Object.defineProperty(proto.prototype, prop, { set: new Proxy(originalSetter, proxy) });
+					}
+				}
+			} catch (e) { real.warn(`[EV] Failed to hook ${proto.name}.prototype.${prop}:`, e); }
+		};
+		hookJavascriptUrl(HTMLAnchorElement, 'href');
+		hookJavascriptUrl(HTMLLinkElement, 'href');
+		hookJavascriptUrl(HTMLScriptElement, 'src');
+		hookJavascriptUrl(HTMLImageElement, 'src');
+
+		// [VF-PATCH:FrameworkSinkHooks-styleHTML]
+		try {
+			if (typeof HTMLStyleElement !== 'undefined' && HTMLStyleElement.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(HTMLStyleElement.prototype, 'innerHTML');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(HTMLStyleElement.innerHTML)';
+					Object.defineProperty(HTMLStyleElement.prototype, 'innerHTML', { set: new Proxy(originalSetter, proxy) });
+				}
+			}
+		} catch (e) { real.warn('[EV] Failed to hook HTMLStyleElement.prototype.innerHTML:', e); }
+		try {
+			if (typeof CSSStyleSheet !== 'undefined' && CSSStyleSheet.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(CSSStyleSheet.prototype, 'cssText');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(CSSStyleSheet.cssText)';
+					Object.defineProperty(CSSStyleSheet.prototype, 'cssText', { set: new Proxy(originalSetter, proxy) });
+				}
+			}
+		} catch (e) { real.warn('[EV] Failed to hook CSSStyleSheet.prototype.cssText:', e); }
+
+		// Existing framework source hooks
 		try {
 			const origAttachShadow = Element.prototype.attachShadow;
 			Element.prototype.attachShadow = function (options) {
@@ -751,28 +885,7 @@ const rewriter = function(CONFIG) {
 				});
 				return shadowRoot;
 			};
-		} catch(e) { real.warn('[EV] Failed to hook Shadow DOM:', e); }
-
-		// [VF-PATCH:FrameworkSinkHooks-ShadowRoot]
-		// Hook ShadowRoot.innerHTML setter, as it's a sink not covered by Element.innerHTML
-		try {
-			if (typeof ShadowRoot !== 'undefined' && ShadowRoot.prototype) {
-				const descriptor = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'innerHTML');
-				if (descriptor && descriptor.set) {
-					const originalSetter = descriptor.set;
-					const proxy = new evProxy(INTRBUNDLE);
-					proxy.evname = 'set(ShadowRoot.innerHTML)';
-
-					Object.defineProperty(ShadowRoot.prototype, 'innerHTML', {
-						set: new Proxy(originalSetter, proxy)
-					});
-				}
-			}
-		} catch (e) {
-			real.warn('[EV] Failed to hook ShadowRoot.prototype.innerHTML:', e);
-		}
-		// [VF-PATCH:FrameworkSinkHooks-ShadowRoot]
-
+		} catch(e) { real.warn('[EV] Failed to hook Shadow DOM sources:', e); }
 		try {
 			if (window.React && window.React.createElement) {
 				const origCreateElement = window.React.createElement;
@@ -793,7 +906,6 @@ const rewriter = function(CONFIG) {
 				};
 			}
 		} catch(e) { real.warn('[EV] Failed to hook React:', e); }
-
 		try {
 			if (window.Vue && window.Vue.prototype && window.Vue.prototype.$mount) {
 				const origMount = window.Vue.prototype.$mount;
