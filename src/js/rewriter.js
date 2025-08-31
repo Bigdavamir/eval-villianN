@@ -1251,31 +1251,42 @@ const rewriter = function(CONFIG) {
 			};
 
 			// [VF-PATCH:PassiveInputListener] start
-			// This function now includes a retry mechanism for robustness.
+			// This function now includes a retry mechanism and captures a direct reference to the sourcer function.
 			function setupPassiveInputListener() {
+				let sourcerFunc = null; // This will hold the direct reference.
+
+				const handleInput = (event) => {
+					const target = event.target;
+					if (target.type === 'password') return;
+
+					const value = target.value.trim();
+					const userSourceFifo = ALLSOURCES.userSource;
+
+					if (value === '' || !userSourceFifo || userSourceFifo.has(value)) {
+						return;
+					}
+
+					if (sourcerFunc) {
+						sourcerFunc("PassiveInputListener", value, true);
+					}
+				};
+
+				const attachListeners = (element) => {
+					if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && element.type !== 'password') {
+						element.addEventListener('input', handleInput);
+						element.addEventListener('change', handleInput);
+					}
+				};
+
 				const trySetup = () => {
-					// CONFIG.sourcer is used here, so this must run before it's deleted.
 					const sourcerName = CONFIG.sourcer;
 					const userSourceFifo = ALLSOURCES.userSource;
 
-					if (!sourcerName || !window[sourcerName] || !userSourceFifo) {
-						return false; // Signal that setup failed and a retry is needed.
+					if (!sourcerName || typeof window[sourcerName] !== 'function' || !userSourceFifo) {
+						return false; // Retry needed.
 					}
 
-					const handleInput = (event) => {
-						const target = event.target;
-						if (target.type === 'password') return;
-						const value = target.value.trim();
-						if (value === '' || userSourceFifo.has(value)) return;
-						window[sourcerName]("PassiveInputListener", value, true);
-					};
-
-					const attachListeners = (element) => {
-						if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && element.type !== 'password') {
-							element.addEventListener('input', handleInput);
-							element.addEventListener('change', handleInput);
-						}
-					};
+					sourcerFunc = window[sourcerName]; // Capture the direct function reference.
 
 					document.querySelectorAll('input, textarea').forEach(attachListeners);
 
@@ -1291,13 +1302,12 @@ const rewriter = function(CONFIG) {
 							}
 						}
 					});
-
 					observer.observe(document.body, { childList: true, subtree: true });
-					return true; // Signal that setup was successful.
+
+					return true; // Success, no retry needed.
 				};
 
 				if (!trySetup()) {
-					// If initial setup fails, wait for the DOM to load and then retry.
 					const onReady = () => {
 						let attempts = 0;
 						const maxAttempts = 10;
