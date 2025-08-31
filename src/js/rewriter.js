@@ -913,6 +913,55 @@ const rewriter = function(CONFIG) {
 	}
 
 
+	// [VF-PATCH:NavigationSinkHooks] start
+	function hookNavigationSinks() {
+		try {
+			const logFmt = CONFIG.formats.interesting;
+			// Use a safe sourcer function to avoid errors if it's not defined
+			const sourcer = (CONFIG.sourcer && window[CONFIG.sourcer]) ? window[CONFIG.sourcer] : () => {};
+
+			// --- Hook location.href setter ---
+			// We must get the descriptor from the prototype
+			const hrefDescriptor = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+			if (hrefDescriptor && hrefDescriptor.set) {
+				const originalHrefSetter = hrefDescriptor.set;
+				Object.defineProperty(window.location, 'href', {
+					configurable: true, // Allow this to be undone if needed
+					enumerable: true,
+					get: hrefDescriptor.get, // Use original getter
+					set: function(url) {
+						real.log(`%c[EV] Navigation Sink (href): %c${url}`, logFmt.highlight, logFmt.default);
+						sourcer('location.href', url);
+						// Call the original setter on the location object
+						return originalHrefSetter.call(window.location, url);
+					}
+				});
+			} else {
+				 real.warn('[EV] Could not hook Location.prototype.href setter.');
+			}
+
+			// --- Hook location.assign ---
+			const originalAssign = window.location.assign;
+			window.location.assign = function(url) {
+				real.log(`%c[EV] Navigation Sink (assign): %c${url}`, logFmt.highlight, logFmt.default);
+				sourcer('location.assign', url);
+				return originalAssign.call(window.location, url);
+			};
+
+			// --- Hook location.replace ---
+			const originalReplace = window.location.replace;
+			window.location.replace = function(url) {
+				real.log(`%c[EV] Navigation Sink (replace): %c${url}`, logFmt.highlight, logFmt.default);
+				sourcer('location.replace', url);
+				return originalReplace.call(window.location, url);
+			};
+
+		} catch (e) {
+			real.error('[EV] CRITICAL: Failed to hook navigation sinks.', e);
+		}
+	}
+	// [VF-PATCH:NavigationSinkHooks] end
+
 	// [VF-PATCH:FrameworkSinkHooks] start
 	function hookFrameworks() {
 		const sourcer = CONFIG.sourcer;
@@ -1217,6 +1266,8 @@ const rewriter = function(CONFIG) {
 	for (const nm of CONFIG["functions"]) {
 		applyEvalVillain(nm);
 	}
+
+	hookNavigationSinks();
 
 	// [VF-PATCH:FrameworkSinkHooks] start
 	hookFrameworks();
