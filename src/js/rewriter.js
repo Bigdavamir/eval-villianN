@@ -824,6 +824,41 @@ const rewriter = function(CONFIG) {
 		const sourcerName = CONFIG.sourcerName;
 		const sourcer = (sourcerName && window[sourcerName]) ? window[sourcerName] : () => {};
 
+		// [VF-PATCH:FrameworkSinkHooks-SyncLocation]
+		// Experimental: Attempt to hook location properties directly for synchronous detection.
+		// This may be blocked by browser security policies.
+		try {
+			if (typeof Location !== 'undefined' && Location.prototype) {
+				const locProto = Location.prototype;
+				const propsToHook = {
+					'href': 'set',
+					'assign': 'value',
+					'replace': 'value'
+				};
+
+				for (const prop in propsToHook) {
+					const type = propsToHook[prop];
+					const descriptor = Object.getOwnPropertyDescriptor(locProto, prop);
+
+					if (descriptor && (descriptor.set || typeof descriptor.value === 'function')) {
+						const original = descriptor.set ? descriptor.set : descriptor.value;
+						const proxy = new evProxy(INTRBUNDLE);
+						proxy.evname = (type === 'set' ? 'set(location.' : 'location.') + prop + ')';
+
+						if (type === 'set') {
+							Object.defineProperty(window.location, prop, {
+								set: new Proxy(original, proxy)
+							});
+						} else {
+							window.location[prop] = new Proxy(original, proxy);
+						}
+					}
+				}
+			}
+		} catch (e) {
+			real.warn('[EV] Failed to apply experimental synchronous location hooks. This is often expected due to browser security.', e);
+		}
+
 		// [VF-PATCH:FrameworkSinkHooks-ShadowRoot]
 		try {
 			if (typeof ShadowRoot !== 'undefined' && ShadowRoot.prototype) {
@@ -1378,6 +1413,9 @@ const rewriter = function(CONFIG) {
 				try {
 					const currentHref = location.href;
 					if (currentHref !== lastHref) {
+						// TODO: This debugger statement can be commented out for production builds
+						// to prevent pausing execution for regular users.
+						debugger;
 						lastHref = currentHref;
 						EvalVillainHook(INTRBUNDLE, 'PassiveLocationChange', [currentHref]);
 					}
