@@ -1011,6 +1011,63 @@ const rewriter = function(CONFIG) {
 				}
 				addToFifo({ display: `${srcer}[${src_name}]`, search: src_val }, "userSource");
 				return false;
+			};
+
+			// [VF-PATCH:PassiveInputListener] start
+			function setupPassiveInputListener() {
+				const userSourceFifo = ALLSOURCES.userSource;
+
+				// Find a live reference to the API function by searching the window object.
+				// This avoids the race condition with `delete CONFIG.sourcer`.
+				const sourcerFn = (() => {
+					for (const key in window) {
+						// Heuristically find the sourcer function by its likely name or usage.
+						if (typeof window[key] === 'function' && /PassiveInputListener|userSource|evSourcer/.test(key)) {
+							return window[key];
+						}
+					}
+					return null;
+				})();
+
+				// If the necessary functions aren't available, we can't proceed.
+				if (!sourcerFn || !userSourceFifo) {
+					real.warn("[EV] PassiveInputListener could not find the sourcer API or userSourceFifo.");
+					return;
+				}
+
+				const handleInput = (event) => {
+					const target = event.target;
+					if (target.type === 'password') return;
+
+					const value = target.value.trim();
+					if (value === '' || userSourceFifo.has(value)) {
+						return;
+					}
+
+					// Use the directly captured function reference.
+					sourcerFn("PassiveInputListener", value, true);
+				};
+
+				const attachListeners = (element) => {
+					if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && element.type !== 'password') {
+						element.addEventListener('input', handleInput);
+						element.addEventListener('change', handleInput);
+					}
+				};
+
+				// Initial setup for existing elements
+				document.querySelectorAll('input, textarea').forEach(attachListeners);
+
+				// Setup observer for dynamically added elements
+				const observer = new MutationObserver((mutationsList) => {
+					for (const mutation of mutationsList) {
+						if (mutation.type === 'childList') {
+							mutation.addedNodes.forEach(node => {
+								if (node.nodeType === Node.ELEMENT_NODE) {
+									attachListeners(node);
+									node.querySelectorAll('input, textarea').forEach(attachListeners);
+								}
+							});
 			}
 			// Do not delete CONFIG.sourcer, it is needed by PassiveInputListener
 		}
@@ -1079,10 +1136,16 @@ const rewriter = function(CONFIG) {
 							attachListeners(node);
 							node.querySelectorAll('input, textarea').forEach(attachListeners);
 						}
-					});
-				}
+					}
+				});
+				observer.observe(document.body, { childList: true, subtree: true });
 			}
-		});
+			setupPassiveInputListener();
+			// [VF-PATCH:PassiveInputListener] end
+
+			delete CONFIG.sourcer;
+		}
+	}
 
 		observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
 	}
