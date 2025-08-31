@@ -3,27 +3,27 @@
 	"name" : "Eval Villain",
 	"version" : "2.11",
 	"description" : "Hook interesting functions to see their input.",
-	"permissions": ["<all_urls>", "storage"],
+	"permissions": ["<all_urls>", "storage", "webNavigation"],
 	"icons" : {
 		"48" : "icons/on_48.png",
 		"96" : "icons/on_96.png"
 	},
 
 	"background": {
-		"scripts": ["js/background.js"]
+		"scripts": ["/js/background.js"]
 	},
 
 	"browser_action": {
 		"default_title": "EvalVillain: off",
 		"default_icon": {
-			"48": "icons/off_48.png",
-			"96": "icons/off_96.png"
+			"48": "/icons/off_48.png",
+			"96": "/icons/off_96.png"
 		},
-		"default_popup": "pages/popup/menu.html"
+		"default_popup": "/pages/popup/menu.html"
 	},
 
 	"options_ui": {
-		"page": "pages/options/options.html"
+		"page": "/pages/options/options.html"
 	},
 
 	"commands": {
