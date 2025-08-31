@@ -1076,7 +1076,7 @@ const rewriter = function(CONFIG) {
 
 		const attachListeners = (element) => {
 			if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && !element.dataset.ev_listener) {
-				element.addEventListener('input', handleInput, { passive: true });
+				// Only listen for the 'change' event to capture the final value.
 				element.addEventListener('change', handleInput, { passive: true });
 				element.dataset.ev_listener = true;
 			}
