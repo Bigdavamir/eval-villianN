@@ -198,6 +198,30 @@ const rewriter = function(CONFIG) {
 
 	// set of strings to search for
 	function addToFifo(sObj, fifoName) { // TODO: add blacklist arg
+		// [VF-PATCH:TimelineTracking] start
+		if (!sObj.timestamp) { // Add timestamp and origin if not already present
+			sObj.timestamp = new Date().toISOString();
+			sObj.origin = location.href;
+		}
+		// [VF-PATCH:TimelineTracking] end
+		// [VF-PATCH:PersistentInputs] start
+		const EV_PERSISTENT_SOURCES_KEY = 'evalvillain_persistent_sources';
+		try {
+			// Persist sources that are explicitly provided by the user via the sourcer API.
+			if (fifoName === 'userSource') {
+				const s = sObj.search;
+				if (typeof s === 'string' && s.length > 0) {
+					let persisted = real.JSON.parse(real.localStorage.getItem(EV_PERSISTENT_SOURCES_KEY) || '[]');
+					if (!persisted.includes(s)) {
+						persisted.push(s);
+						real.localStorage.setItem(EV_PERSISTENT_SOURCES_KEY, real.JSON.stringify(persisted));
+					}
+				}
+			}
+		} catch (e) {
+			real.warn('[EV] Error with persistent sources:', e);
+		}
+		// [VF-PATCH:PersistentInputs] end
 		const fifo = ALLSOURCES[fifoName];
 		if (!fifo) {
 			throw `No ${fifoName}`;
@@ -214,9 +238,44 @@ const rewriter = function(CONFIG) {
 			}
 		}
 
+		// [VF-PATCH:AdvancedBodySearch] start
+		function* parseMultipart(body, decoded, fwd) {
+			// A simplified multipart/form-data parser.
+			const boundaryMatch = body.match(/boundary="?([^";\s]+)"?/);
+			if (!boundaryMatch) return false;
+
+			const boundary = `--${boundaryMatch[1]}`;
+			const parts = body.split(boundary).slice(1, -1);
+
+			for (let i = 0; i < parts.length; i++) {
+				const part = parts[i].trim();
+				const headerEnd = part.indexOf('\r\n\r\n');
+				if (headerEnd === -1) continue;
+
+				const header = part.substring(0, headerEnd);
+				const partBody = part.substring(headerEnd + 4);
+
+				const nameMatch = header.match(/name="([^"]+)"/);
+				const partName = nameMatch ? nameMatch[1] : `part_${i}`;
+				const newFwd = `${fwd}['${partName}']`;
+
+				// Recursively decode the body of the part.
+				yield* decodeAny(partBody, decoded, newFwd);
+			}
+			return true;
+		}
+		// [VF-PATCH:AdvancedBodySearch] end
+
 		function *deepDecode(s) {
 			// TODO: Sets...
 			if (typeof(s) === 'string') {
+				// [VF-PATCH:AdvancedBodySearch] start
+				if (s.includes('multipart/form-data') && s.includes('boundary=')) {
+					if (yield* parseMultipart(s, '', '')) {
+						return;
+					}
+				}
+				// [VF-PATCH:AdvancedBodySearch] end
 				yield *decodeAll(s);
 			} else if (typeof(s) === "object") {
 				const fwd = `\t{\n\t\tlet _ = ${JSON.stringify(s)};\n\t\t_`;
@@ -233,6 +292,22 @@ const rewriter = function(CONFIG) {
 
 
 		function *decodeAny(any, decoded, fwd) {
+			// [VF-PATCH:AdvancedBodySearch] start
+			// Handle binary data, common in octet-streams.
+			if (any instanceof ArrayBuffer) {
+				try {
+					// Try decoding as UTF-8 text first.
+					const text = new TextDecoder("utf-8", { fatal: true }).decode(any);
+					yield* decodeAll(text, `	x = new TextEncoder().encode(x);\n${decoded}`);
+				} catch (e) {
+					// If that fails, treat as a raw byte string.
+					const s = String.fromCharCode.apply(null, new Uint8Array(any));
+					yield* decodeAll(s, `/* ... encoded from byte array ... */\n${decoded}`);
+				}
+				return;
+			}
+			// [VF-PATCH:AdvancedBodySearch] end
+
 			if (Array.isArray(any)) {
 				yield *decodeArray(any, decoded, fwd);
 			} else if (typeof(any) == "object"){
@@ -327,6 +402,49 @@ const rewriter = function(CONFIG) {
 					return;
 				}
 			} catch (_) {/**/}
+
+			// [VF-PATCH:ExtendedDecoders] start
+			try {
+				// Hex strings
+				if (/^([0-9a-fA-F]{2})+$/.test(s)) {
+					let dec = '';
+					for (let i = 0; i < s.length; i += 2) {
+						dec += String.fromCharCode(parseInt(s.substr(i, 2), 16));
+					}
+					if (dec && dec !== s && !isNeedleBad(dec)) {
+						const encoder = `	x = x.split('').map(c=>c.charCodeAt(0).toString(16).padStart(2,'0')).join('');
+`;
+						yield *decodeAll(dec, encoder + decoded);
+					}
+				}
+
+				// JSON Unicode escapes (\uXXXX)
+				if (s.includes('\\u')) {
+					const dec = s.replace(/\\u([\d\w]{4})/gi, (match, grp) => String.fromCharCode(parseInt(grp, 16)));
+					if (dec && dec !== s && !isNeedleBad(dec)) {
+						const encoder = `	x = x.split('').map(c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')).join('');
+`;
+						yield *decodeAll(dec, encoder + decoded);
+					}
+				}
+
+				// String.fromCharCode() style numeric sequences
+				if (s.includes('String.fromCharCode')) {
+					const match = /String\.fromCharCode\(([\d,\s]+)\)/.exec(s);
+					if (match && match[1]) {
+						const args = match[1].split(',').map(n => parseInt(n.trim(), 10));
+						const dec = String.fromCharCode(...args);
+						if (dec && !isNeedleBad(dec)) {
+							const encoder = `	x = 'String.fromCharCode(' + x.split('').map(c => c.charCodeAt(0)).join(',') + ')';
+`;
+							yield *decodeAll(dec, encoder + decoded);
+						}
+					}
+				}
+			} catch(e) {
+				real.warn('[EV] Error during extended decoding:', e);
+			}
+			// [VF-PATCH:ExtendedDecoders] end
 
 			// string replace
 			const dec = s.replaceAll("+", " ");
@@ -535,6 +653,16 @@ const rewriter = function(CONFIG) {
 			}
 
 			const end = zebraGroup(title, fmt);
+
+			// [VF-PATCH:TimelineTracking] start
+			if (s.timestamp && s.origin) {
+				const timeFmt = {default: '#777', highlight: '#999'};
+				real.log(`%cSource ingested at: %c${s.timestamp} %cfrom %c${s.origin}`,
+					timeFmt.default, timeFmt.highlight, timeFmt.default, timeFmt.highlight
+				);
+			}
+			// [VF-PATCH:TimelineTracking] end
+
 			if (dots) {
 				const d = "Entire needle:"
 				real.logGroupCollapsed(d);
@@ -632,6 +760,18 @@ const rewriter = function(CONFIG) {
 			if (!format.use) {
 				return false;
 			}
+			// [VF-PATCH:IframeAndSWBridge] start
+			try {
+				if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+					navigator.serviceWorker.controller.postMessage({
+						type: 'EVALVILLAIN_SINK_FOUND',
+						sink: name,
+						args: argObj.args.map(a => a.str),
+						url: location.href
+					});
+				}
+			} catch(e) { real.warn('[EV] Failed to post message to Service Worker:', e); }
+			// [VF-PATCH:IframeAndSWBridge] end
 		} else {
 			format = fmts.title;
 			if (!format.use) {
@@ -771,6 +911,151 @@ const rewriter = function(CONFIG) {
 	}
 
 
+	// [VF-PATCH:FrameworkSinkHooks] start
+	function hookFrameworks() {
+		const sourcer = CONFIG.sourcer;
+		if (!sourcer || !window[sourcer]) {
+			// We need the sourcer API to feed data from frameworks back into Eval Villain.
+			return;
+		}
+
+		// --- Shadow DOM Hook ---
+		try {
+			const origAttachShadow = Element.prototype.attachShadow;
+			Element.prototype.attachShadow = function (options) {
+				const shadowRoot = origAttachShadow.call(this, options);
+				// After creating the shadow root, scan it for interesting sinks.
+				const scripts = shadowRoot.querySelectorAll('script');
+				scripts.forEach((script, i) => {
+					if (script.src) {
+						window[sourcer](`ShadowDOM.script[${i}].src`, script.src);
+					}
+					if (script.innerHTML) {
+						window[sourcer](`ShadowDOM.script[${i}].innerHTML`, script.innerHTML);
+					}
+				});
+				return shadowRoot;
+			};
+		} catch(e) { real.warn('[EV] Failed to hook Shadow DOM:', e); }
+
+		// --- React Hook ---
+		try {
+			if (window.React && window.React.createElement) {
+				const origCreateElement = window.React.createElement;
+				window.React.createElement = function(type, props, ...children) {
+					if (props) {
+						if (props.dangerouslySetInnerHTML && props.dangerouslySetInnerHTML.__html) {
+							window[sourcer]('React.dangerouslySetInnerHTML', props.dangerouslySetInnerHTML.__html);
+						}
+						for (const propName in props) {
+							if (propName.toLowerCase() === 'href' || propName.toLowerCase() === 'src' || propName.toLowerCase().startsWith('on')) {
+								if (typeof props[propName] === 'string') {
+									window[sourcer](`React.prop[${propName}]`, props[propName]);
+								}
+							}
+						}
+					}
+					return origCreateElement.apply(this, arguments);
+				};
+			}
+		} catch(e) { real.warn('[EV] Failed to hook React:', e); }
+
+		// --- Vue Hook ---
+		try {
+			if (window.Vue && window.Vue.prototype && window.Vue.prototype.$mount) {
+				const origMount = window.Vue.prototype.$mount;
+				window.Vue.prototype.$mount = function() {
+					if (this.$props) {
+						for (const key in this.$props) {
+							const propVal = this.$props[key];
+							if (typeof propVal === 'string') {
+								 window[sourcer](`Vue.prop[${key}]`, propVal);
+							}
+						}
+					}
+					return origMount.apply(this, arguments);
+				}
+			}
+		} catch(e) { real.warn('[EV] Failed to hook Vue:', e); }
+
+		// --- Angular Hook (Best-Effort) ---
+		try {
+			if (window.ng && window.ng.probe) { // ng.probe is for older Angular in debug mode
+				real.log('[EV] Angular detected (debug mode). Advanced hooking not yet implemented in this patch.');
+			}
+		} catch(e) { real.warn('[EV] Failed to hook Angular:', e); }
+	}
+	// [VF-PATCH:FrameworkSinkHooks] end
+
+	// [VF-PATCH:IframeAndSWBridge] start
+	function setupCommunicationBridges() {
+		// --- Iframe Bridge ---
+		function applyToFrame(frameWindow) {
+			function getFuncInFrame(n) {
+				const ret = {};
+				ret.where = frameWindow;
+				const groups = n.split(".");
+				let i = 0;
+				for (i = 0; i < groups.length - 1; i++) {
+					ret.where = ret.where[groups[i]];
+					if (!ret.where) return null;
+				}
+				ret.leaf = groups[i];
+				return ret;
+			}
+
+			for (const evname of CONFIG["functions"]) {
+				try {
+					const ownprop = /^(set|value)\(([a-zA-Z.]+)\)\s*$/.exec(evname);
+					const ep = new evProxy(INTRBUNDLE);
+					ep.evname = evname;
+
+					if (ownprop) {
+						const prop = ownprop[1];
+						const f = getFuncInFrame(ownprop[2]);
+						if (f && f.where && typeof f.where.prototype === 'object' && f.where.prototype !== null) {
+							const orig = Object.getOwnPropertyDescriptor(f.where.prototype, f.leaf);
+							if (orig && orig[prop]) {
+								Object.defineProperty(f.where.prototype, f.leaf, { [prop]: new Proxy(orig[prop], ep) });
+							}
+						}
+					} else if (/^[a-zA-Z.]+$/.test(evname)) {
+						const f = getFuncInFrame(evname);
+						if (f && f.where && f.where[f.leaf]) {
+							const desc = Object.getOwnPropertyDescriptor(f.where, f.leaf);
+							if (desc && desc.configurable) {
+							   f.where[f.leaf] = new Proxy(f.where[f.leaf], ep);
+							}
+						}
+					}
+				} catch (e) {
+					real.warn(`[EV] Failed to hook ${evname} in iframe:`, e);
+				}
+			}
+		}
+
+		for (let i = 0; i < window.frames.length; i++) {
+			try {
+				if (window.frames[i].window.location.href) {
+					real.log(`[EV] Applying hooks to same-origin iframe #${i}`);
+					applyToFrame(window.frames[i].window);
+				}
+			} catch (e) { /* Expected for cross-origin frames */ }
+		}
+
+		// --- Service Worker Bridge (Listener) ---
+		try {
+			if (navigator.serviceWorker) {
+				navigator.serviceWorker.addEventListener('message', event => {
+					if (event.data && event.data.type === 'EVALVILLAIN_NEW_SOURCE' && CONFIG.sourcer && window[CONFIG.sourcer]) {
+						window[CONFIG.sourcer](`SW[${event.data.sourceName}]`, event.data.sourceValue);
+					}
+				});
+			}
+		} catch (e) { real.warn('[EV] Failed to set up Service Worker listener:', e); }
+	}
+	// [VF-PATCH:IframeAndSWBridge] end
+
 	/**
 	 * Parses initial values contained in sources and updates fifos with them.
 	 **/
@@ -834,6 +1119,30 @@ const rewriter = function(CONFIG) {
 		putInUse("fragment");
 		putInUse("path");
 		putInUse("query");
+
+		// [VF-PATCH:PersistentInputs] start
+		const EV_PERSISTENT_SOURCES_KEY = 'evalvillain_persistent_sources';
+		// Use userSource's format if available, otherwise use a default.
+		const persistentSrcFmt = CONFIG.formats.userSource || { use: true, limit: 100, pretty: "Persistent" };
+		if (persistentSrcFmt.use) {
+			const nm = "userSource"; // Piggyback on the userSource FIFO
+			if (!ALLSOURCES[nm]) {
+				ALLSOURCES[nm] = new SourceFifo(persistentSrcFmt.limit);
+			}
+			try {
+				const persisted = real.JSON.parse(real.localStorage.getItem(EV_PERSISTENT_SOURCES_KEY) || '[]');
+				for (const item of persisted) {
+					addToFifo({
+						display: "Persistent",
+						search: item,
+					}, nm);
+				}
+			} catch (e) {
+				real.warn('[EV] Error loading persistent sources:', e);
+			}
+		}
+		// [VF-PATCH:PersistentInputs] end
+
 		addChangingSearch();
 	}
 
@@ -863,6 +1172,35 @@ const rewriter = function(CONFIG) {
 
 	const BLACKLIST = new NeedleBundle(CONFIG.blacklist);
 	delete CONFIG.blacklist;
+	// [VF-PATCH:PersistentInputs] start
+	const EV_PERSISTENT_NEEDLES_KEY = 'evalvillain_persistent_needles';
+	try {
+		// Load persisted needles and merge them with the current configuration.
+		const persistedNeedles = real.JSON.parse(real.localStorage.getItem(EV_PERSISTENT_NEEDLES_KEY) || '[]');
+		for (const p_needle of persistedNeedles) {
+			if (!CONFIG.needles.includes(p_needle)) {
+				CONFIG.needles.push(p_needle);
+			}
+		}
+
+		// Save any new needles from the current configuration back to localStorage.
+		let updated = false;
+		// Re-fetch to ensure we have the latest list before appending.
+		const currentNeedles = real.JSON.parse(real.localStorage.getItem(EV_PERSISTENT_NEEDLES_KEY) || '[]');
+		for (const needle of CONFIG.needles) {
+			if (!currentNeedles.includes(needle)) {
+				currentNeedles.push(needle);
+				updated = true;
+			}
+		}
+		if (updated) {
+			real.localStorage.setItem(EV_PERSISTENT_NEEDLES_KEY, real.JSON.stringify(currentNeedles));
+		}
+	} catch (e) {
+		real.warn('[EV] Error with persistent needles:', e);
+	}
+	// [VF-PATCH:PersistentInputs] end
+
 	const INTRBUNDLE = new SearchBundle(
 		new NeedleBundle(CONFIG.needles),
 		ALLSOURCES
@@ -874,6 +1212,14 @@ const rewriter = function(CONFIG) {
 	for (const nm of CONFIG["functions"]) {
 		applyEvalVillain(nm);
 	}
+
+	// [VF-PATCH:FrameworkSinkHooks] start
+	hookFrameworks();
+	// [VF-PATCH:FrameworkSinkHooks] end
+
+	// [VF-PATCH:IframeAndSWBridge] start
+	setupCommunicationBridges();
+	// [VF-PATCH:IframeAndSWBridge] end
 
 	// turns console.log into console.info
 	if (CONFIG.formats.logReroute.use) {
