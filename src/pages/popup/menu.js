@@ -1,4 +1,4 @@
-var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerFeatures"];
+var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types"];
 function updateToggle(on) {
 	if (typeof(on) !== "boolean") {
 		console.error("unexpected message type");
@@ -50,7 +50,7 @@ function createCheckBox(name, checked, subMenu) {
 }
 
 async function getSections() {
-	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats", "powerFeatures"]);
+	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats"]);
 	const autoOpen = [];
 	const onOff = [];
 	for (let k of all.formats) {
@@ -112,8 +112,6 @@ async function updateSubmenu(target) {
 
 	if (["autoOpen", "onOff"].includes(name)) {
 		name = "formats";
-	} else if (name === "powerFeatures") {
-		ident = "name";
 	}
 
 	const res = await browser.storage.local.get(name);
@@ -157,7 +155,7 @@ function listener(ev) {
 		return
 	}
 
-	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types", "h1-powerFeatures"].includes(id)) {
+	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types"].includes(id)) {
 		let sub = id.substr(3);
 		let formats = document.getElementById(sub);
 		formats.classList.toggle('closed');
