@@ -1,4 +1,4 @@
-/* Eval Villain just jams this rewriter function into the loading page, withALAKI
+/* Eval Villain just jams this rewriter function into the loading page, with
  * some JSON as CONFIG. Normally Firefox does this for you from the
  * background.js file. But you could always copy paste this code anywhere you
  * want. Such as into a proxie'd response or electron instramentation.
@@ -686,6 +686,97 @@ const rewriter = function(CONFIG) {
 			return ret ? ret : null;
 		}
 
+		const sourcer = (CONFIG.sourcerName && window[CONFIG.sourcerName]) ? window[CONFIG.sourcerName] : () => {};
+
+		// [VF-PATCH:NewSinks-ResponseSources]
+		if (evname === 'fetch') {
+			const originalFetch = window.fetch;
+			window.fetch = new Proxy(originalFetch, {
+				apply: function(target, thisArg, args) {
+					EvalVillainHook(INTRBUNDLE, 'fetch', args);
+					const result = Reflect.apply(target, thisArg, args);
+					return result.then(response => {
+						const responseProxy = new Proxy(response, {
+							get: function(target, prop) {
+								const originalValue = target[prop];
+								if (['text', 'json', 'blob'].includes(prop) && typeof originalValue === 'function') {
+									return function(...args) {
+										return originalValue.apply(target, args).then(body => {
+											sourcer('fetch.response', body);
+											return body;
+										});
+									};
+								}
+								return originalValue;
+							}
+						});
+						return responseProxy;
+					});
+				}
+			});
+			return;
+		}
+		if (evname === 'value(XMLHttpRequest.open)') {
+			const originalOpen = XMLHttpRequest.prototype.open;
+			XMLHttpRequest.prototype.open = new Proxy(originalOpen, {
+				apply: function(target, thisArg, args) {
+					EvalVillainHook(INTRBUNDLE, 'XMLHttpRequest.open', args);
+					thisArg.addEventListener('load', function() {
+						if (this.responseText) {
+							sourcer('XHR.response', this.responseText);
+						}
+					}, { passive: true });
+					return Reflect.apply(target, thisArg, args);
+				}
+			});
+			return;
+		}
+		// [VF-PATCH:NewSinks-ResponseSources]
+
+		// [VF-PATCH:NewSinks-MessageAndSocketSources]
+		if (evname === 'window.addEventListener') {
+			const originalAddEventListener = window.addEventListener;
+			window.addEventListener = new Proxy(originalAddEventListener, {
+				apply: function(target, thisArg, args) {
+					const [type, listener] = args;
+					if (type === 'message') {
+						const wrappedListener = function(event) {
+							sourcer('postMessage.data', event.data);
+							return listener.apply(this, arguments);
+						};
+						args[1] = wrappedListener;
+					}
+					EvalVillainHook(INTRBUNDLE, 'window.addEventListener', args);
+					return Reflect.apply(target, thisArg, args);
+				}
+			});
+			return;
+		}
+		if (evname === 'WebSocket') {
+			const originalWebSocket = window.WebSocket;
+			window.WebSocket = new Proxy(originalWebSocket, {
+				construct: function(target, args) {
+					EvalVillainHook(INTRBUNDLE, 'new WebSocket()', args);
+					const instance = Reflect.construct(target, args);
+					return new Proxy(instance, {
+						set: function(target, prop, value) {
+							if (prop === 'onmessage' && typeof value === 'function') {
+								target[prop] = function(event) {
+									sourcer('WebSocket.onmessage', event.data);
+									return value.apply(this, arguments);
+								};
+							} else {
+								target[prop] = value;
+							}
+							return true;
+						}
+					});
+				}
+			});
+			return;
+		}
+		// [VF-PATCH:NewSinks-MessageAndSocketSources]
+
 		const ownprop = /^(set|value)\(([a-zA-Z.]+)\)\s*$/.exec(evname);
 		const ep = new evProxy(INTRBUNDLE);
 		ep.evname = evname;
@@ -819,8 +910,25 @@ const rewriter = function(CONFIG) {
 			}
 		} catch (e) { real.warn('[EV] Failed to hook Element.prototype.outerHTML:', e); }
 
+		// [VF-PATCH:NewSinks-document.domain]
+		try {
+			if (typeof Document !== 'undefined' && Document.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'domain');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(document.domain)';
+					Object.defineProperty(Document.prototype, 'domain', {
+						set: new Proxy(originalSetter, proxy)
+					});
+				}
+			}
+		} catch (e) {
+			real.warn('[EV] Failed to hook document.domain:', e);
+		}
+
 		// [VF-PATCH:FrameworkSinkHooks-srcHrefJS]
-		const hookJavascriptUrl = (proto, prop) => {
+		const hookDangerousUrlScheme = (proto, prop) => {
 			try {
 				if (typeof proto !== 'undefined' && proto.prototype) {
 					const descriptor = Object.getOwnPropertyDescriptor(proto.prototype, prop);
@@ -829,8 +937,11 @@ const rewriter = function(CONFIG) {
 						const proxy = {
 							apply: function(target, thisArg, args) {
 								const value = args[0];
-								if (typeof value === 'string' && value.trim().toLowerCase().startsWith('javascript:')) {
-									EvalVillainHook(INTRBUNDLE, `set(${proto.name}.${prop})`, [value]);
+								if (typeof value === 'string') {
+									const lowerValue = value.trim().toLowerCase();
+									if (lowerValue.startsWith('javascript:') || lowerValue.startsWith('data:')) {
+										EvalVillainHook(INTRBUNDLE, `set(${proto.name}.${prop})`, [value]);
+									}
 								}
 								return Reflect.apply(target, thisArg, args);
 							}
@@ -840,10 +951,10 @@ const rewriter = function(CONFIG) {
 				}
 			} catch (e) { real.warn(`[EV] Failed to hook ${proto.name}.prototype.${prop}:`, e); }
 		};
-		hookJavascriptUrl(HTMLAnchorElement, 'href');
-		hookJavascriptUrl(HTMLLinkElement, 'href');
-		hookJavascriptUrl(HTMLScriptElement, 'src');
-		hookJavascriptUrl(HTMLImageElement, 'src');
+		hookDangerousUrlScheme(HTMLAnchorElement, 'href');
+		hookDangerousUrlScheme(HTMLLinkElement, 'href');
+		hookDangerousUrlScheme(HTMLScriptElement, 'src');
+		hookDangerousUrlScheme(HTMLImageElement, 'src');
 
 		// [VF-PATCH:FrameworkSinkHooks-styleHTML]
 		try {
