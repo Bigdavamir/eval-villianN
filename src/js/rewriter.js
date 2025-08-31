@@ -753,6 +753,26 @@ const rewriter = function(CONFIG) {
 			};
 		} catch(e) { real.warn('[EV] Failed to hook Shadow DOM:', e); }
 
+		// [VF-PATCH:FrameworkSinkHooks-ShadowRoot]
+		// Hook ShadowRoot.innerHTML setter, as it's a sink not covered by Element.innerHTML
+		try {
+			if (typeof ShadowRoot !== 'undefined' && ShadowRoot.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'innerHTML');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(ShadowRoot.innerHTML)';
+
+					Object.defineProperty(ShadowRoot.prototype, 'innerHTML', {
+						set: new Proxy(originalSetter, proxy)
+					});
+				}
+			}
+		} catch (e) {
+			real.warn('[EV] Failed to hook ShadowRoot.prototype.innerHTML:', e);
+		}
+		// [VF-PATCH:FrameworkSinkHooks-ShadowRoot]
+
 		try {
 			if (window.React && window.React.createElement) {
 				const origCreateElement = window.React.createElement;
