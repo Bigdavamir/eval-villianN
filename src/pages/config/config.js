@@ -1,4 +1,4 @@
-const configList = ["targets", "needles",  "blacklist", "functions", "globals", "powerFeatures"];
+const configList = ["targets", "needles",  "blacklist", "functions", "globals"];
 const normalHeaders = ["enabled", "name", "pattern"];
 
 function getTableData(tblName) {
@@ -152,16 +152,8 @@ function defAddRow(tblName, ex, focus=false) {
 	}
 
 	cols[0].appendChild(createSwitch());
-	// [VF-PATCH] Handle different data structures for different tables
-	if (tblName === 'powerFeatures') {
-		cols[1].appendChild(createField("name", ex.pretty, true)); // Use 'pretty' and make it read-only
-		cols[2].appendChild(createField("pattern", ex.name, true)); // Store internal name in 'pattern' field, read-only
-		cols[2].style.display = 'none'; // Hide the internal name column from user
-		row.querySelector('.col-lg').previousElementSibling.innerText = "Feature";
-	} else {
-		cols[1].appendChild(createField("name", ex.name, tblName == "globals"));
-		cols[2].appendChild(createField("pattern", ex.pattern));
-	}
+	cols[1].appendChild(createField("name", ex.name, tblName == "globals"));
+	cols[2].appendChild(createField("pattern", ex.pattern));
 
 	cols.forEach(c => row.appendChild(c));
 
