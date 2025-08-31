@@ -978,16 +978,33 @@ const rewriter = function(CONFIG) {
 	buildSearches();
 
 	for (const nm of CONFIG["functions"]) {
-		applyEvalVillain(nm);
+		try {
+			applyEvalVillain(nm);
+		} catch (e) {
+			real.error(`[EV] Failed to apply hook for "${nm}":`, e);
+		}
 	}
 
-	// [VF-PATCH:FrameworkSinkHooks] start
-	hookFrameworks();
-	// [VF-PATCH:FrameworkSinkHooks] end
+	// [VF-FIX:InitAndSourcerFix] start
+	// The original implementation had several points of failure that could halt the entire script.
+	// 1. Any error inside the setup functions (hookFrameworks, etc.) would stop execution.
+	// 2. The `evSourcer` global API was only created under specific configurations, making it unreliable.
+	// 3. The PassiveInputListener setup could fail if its dependencies weren't ready immediately.
+	// The following changes make the initialization robust.
 
-	// [VF-PATCH:IframeAndSWBridge] start
-	setupCommunicationBridges();
-	// [VF-PATCH:IframeAndSWBridge] end
+	// Wrap patch initializations in try...catch to prevent one failing patch from stopping the whole script.
+	try {
+		hookFrameworks();
+	} catch (e) {
+		real.error("[EV] Error during FrameworkSinkHooks initialization:", e);
+	}
+
+	try {
+		setupCommunicationBridges();
+	} catch (e) {
+		real.error("[EV] Error during IframeAndSWBridge initialization:", e);
+	}
+	// [VF-FIX:InitAndSourcerFix] end
 
 	if (CONFIG.formats.logReroute.use) {
 		console.log = console.info;
@@ -998,58 +1015,63 @@ const rewriter = function(CONFIG) {
 		delete CONFIG.sinker;
 	}
 
+	// [VF-FIX:InitAndSourcerFix] start
+	// Decouple the sourcer API creation from the configuration format check.
+	// This ensures `window.evSourcer` is always available for manual console use,
+	// even if the `userSource` FIFO is not actively used for logging.
 	if (CONFIG.sourcer) {
-		const fmt = CONFIG.formats.userSource;
-		if (fmt.use) {
-			const srcer = CONFIG.sourcer;
-			CONFIG.sourcerName = srcer; // Save for other patches
-			ALLSOURCES.userSource = new SourceFifo(fmt.limit);
-			window[srcer] = (src_name, src_val, debug=false) => {
+		const srcer = CONFIG.sourcer;
+		CONFIG.sourcerName = srcer; // Save for other patches to use.
+
+		// Define the sourcer function.
+		const sourcerFunc = (src_name, src_val, debug=false) => {
+			const fmt = CONFIG.formats.userSource;
+			// Only add to FIFO if the format is enabled.
+			if (fmt && fmt.use) {
+				// Ensure the userSource FIFO exists.
+				if (!ALLSOURCES.userSource) {
+					ALLSOURCES.userSource = new SourceFifo(fmt.limit);
+				}
 				if (debug) {
 					const o = typeof(src_val) === 'string'? src_val: real.JSON.stringify(src_val);
 					real.debug(`[EV] ${srcer}[${src_name}] from ${document.location.origin}  added:\n ${o}`);
 				}
 				addToFifo({ display: `${srcer}[${src_name}]`, search: src_val }, "userSource");
-				return false;
 			}
-			// Do not delete CONFIG.sourcer, it is needed by PassiveInputListener
-		}
+			return false;
+		};
+
+		// Always expose the sourcer function to the global scope.
+		window[srcer] = sourcerFunc;
 	}
+	// [VF-FIX:InitAndSourcerFix] end
 
 	// [VF-PATCH:PassiveInputListener] start
-	function setupPassiveInputListener() {
-		// Find the sourcer function and store a direct reference to it.
-		let sourcerFn = null;
-		if (CONFIG.sourcer && typeof window[CONFIG.sourcer] === 'function') {
-			sourcerFn = window[CONFIG.sourcer];
-		} else {
-			// Fallback: Scan the window object if the CONFIG property is missing.
-			const pattern = /\bsourcer\b/i;
-			for (const key in window) {
-				if (pattern.test(key) && typeof window[key] === 'function') {
-					sourcerFn = window[key];
-					break;
-				}
-			}
-		}
+	function setupPassiveInputListener(retryCount = 5) {
+		// [VF-FIX:InitAndSourcerFix]
+		// This setup now includes a retry mechanism. If `ALLSOURCES.userSource` is not
+		// ready yet (which can happen depending on config), it will wait and try again
+		// instead of failing silently. This prevents a race condition during init.
+		const userSourceFifo = ALLSOURCES.userSource;
+		const sourcerName = CONFIG.sourcerName;
+		const sourcerFn = sourcerName ? window[sourcerName] : null;
 
-		if (!sourcerFn || !ALLSOURCES.userSource) {
-			real.warn("[EV] PassiveInputListener disabled: sourcer function or userSource FIFO not found.");
+		if (!sourcerFn || !userSourceFifo) {
+			if (retryCount > 0) {
+				setTimeout(() => setupPassiveInputListener(retryCount - 1), 500);
+			} else {
+				real.warn("[EV] PassiveInputListener disabled: sourcer function or userSource FIFO not found after retries.");
+			}
 			return;
 		}
 
-		const userSourceFifo = ALLSOURCES.userSource;
-
 		const handleInput = (event) => {
 			const target = event.target;
-			if (target.type === 'password') {
-				return;
-			}
+			if (target.type === 'password') return;
+
 			const value = target.value.trim();
-			if (value === '' || userSourceFifo.has(value)) {
-				return;
-			}
-			// Use the direct, locally-scoped reference to the sourcer function.
+			if (value === '' || userSourceFifo.has(value)) return;
+
 			sourcerFn("PassiveInputListener", value, true);
 		};
 
@@ -1057,7 +1079,7 @@ const rewriter = function(CONFIG) {
 			if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && !element.dataset.ev_listener) {
 				element.addEventListener('input', handleInput, { passive: true });
 				element.addEventListener('change', handleInput, { passive: true });
-				element.dataset.ev_listener = true; // Mark as listener attached
+				element.dataset.ev_listener = true;
 			}
 		};
 
@@ -1079,14 +1101,19 @@ const rewriter = function(CONFIG) {
 		observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
 	}
 
-	setupPassiveInputListener();
+	// [VF-FIX:InitAndSourcerFix]
+	// Wrap the call in a try...catch to ensure it cannot halt the script.
+	try {
+		setupPassiveInputListener();
+	} catch (e) {
+		real.error("[EV] Error during PassiveInputListener initialization:", e);
+	}
 	// [VF-PATCH:PassiveInputListener] end
 
 	// Now we can safely delete the sourcer from CONFIG
 	if (CONFIG.sourcer) {
 		delete CONFIG.sourcer;
 	}
-
 
 	real.log("%c[EV]%c Functions hooked for %c%s%c",
 		CONFIG.formats.interesting.highlight,
