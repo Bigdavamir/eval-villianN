@@ -1248,76 +1248,80 @@ const rewriter = function(CONFIG) {
 					search: src_val,
 					}, "userSource");
 				return false;
+			};
+
+			// [VF-PATCH:PassiveInputListener] start
+			// This function now includes a retry mechanism for robustness.
+			function setupPassiveInputListener() {
+				const trySetup = () => {
+					// CONFIG.sourcer is used here, so this must run before it's deleted.
+					const sourcerName = CONFIG.sourcer;
+					const userSourceFifo = ALLSOURCES.userSource;
+
+					if (!sourcerName || !window[sourcerName] || !userSourceFifo) {
+						return false; // Signal that setup failed and a retry is needed.
+					}
+
+					const handleInput = (event) => {
+						const target = event.target;
+						if (target.type === 'password') return;
+						const value = target.value.trim();
+						if (value === '' || userSourceFifo.has(value)) return;
+						window[sourcerName]("PassiveInputListener", value, true);
+					};
+
+					const attachListeners = (element) => {
+						if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && element.type !== 'password') {
+							element.addEventListener('input', handleInput);
+							element.addEventListener('change', handleInput);
+						}
+					};
+
+					document.querySelectorAll('input, textarea').forEach(attachListeners);
+
+					const observer = new MutationObserver((mutationsList) => {
+						for (const mutation of mutationsList) {
+							if (mutation.type === 'childList') {
+								mutation.addedNodes.forEach(node => {
+									if (node.nodeType === Node.ELEMENT_NODE) {
+										attachListeners(node);
+										node.querySelectorAll('input, textarea').forEach(attachListeners);
+									}
+								});
+							}
+						}
+					});
+
+					observer.observe(document.body, { childList: true, subtree: true });
+					return true; // Signal that setup was successful.
+				};
+
+				if (!trySetup()) {
+					// If initial setup fails, wait for the DOM to load and then retry.
+					const onReady = () => {
+						let attempts = 0;
+						const maxAttempts = 10;
+						const interval = setInterval(() => {
+							attempts++;
+							if (trySetup() || attempts >= maxAttempts) {
+								clearInterval(interval);
+							}
+						}, 500);
+					};
+
+					if (document.readyState === 'loading') {
+						window.addEventListener('DOMContentLoaded', onReady);
+					} else {
+						onReady();
+					}
+				}
 			}
+			setupPassiveInputListener();
+			// [VF-PATCH:PassiveInputListener] end
+
 			delete CONFIG.sourcer;
 		}
 	}
-
-	// [VF-PATCH:PassiveInputListener] start
-	function setupPassiveInputListener() {
-		const sourcer = CONFIG.sourcer;
-		const userSourceFifo = ALLSOURCES.userSource;
-
-		// We need the sourcer API and the userSource FIFO to be available.
-		if (!sourcer || !window[sourcer] || !userSourceFifo) {
-			return;
-		}
-
-		// Handler for input/change events
-		const handleInput = (event) => {
-			const target = event.target;
-			if (target.type === 'password') {
-				return;
-			}
-
-			const value = target.value.trim();
-			if (value === '') {
-				return;
-			}
-
-			// Check for duplicates in the userSource FIFO's Set for efficiency.
-			if (userSourceFifo.has(value)) {
-				return;
-			}
-
-			// Call the global sourcer API. debug=true ensures it's persisted by the [VF-PATCH:PersistentInputs].
-			window[sourcer]("PassiveInputListener", value, true);
-		};
-
-		// Function to attach listeners to an element
-		const attachListeners = (element) => {
-			if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && element.type !== 'password') {
-				element.addEventListener('input', handleInput);
-				element.addEventListener('change', handleInput);
-			}
-		};
-
-		// Attach listeners to all existing input and textarea fields
-		document.querySelectorAll('input, textarea').forEach(attachListeners);
-
-		// Use MutationObserver to hook dynamically added elements
-		const observer = new MutationObserver((mutationsList) => {
-			for (const mutation of mutationsList) {
-				if (mutation.type === 'childList') {
-					mutation.addedNodes.forEach(node => {
-						if (node.nodeType === Node.ELEMENT_NODE) {
-							// Check the node itself if it's an input/textarea
-							attachListeners(node);
-							// Check all descendants of the node
-							node.querySelectorAll('input, textarea').forEach(attachListeners);
-						}
-					});
-				}
-			}
-		});
-
-		// Start observing the document body for added nodes
-		observer.observe(document.body, { childList: true, subtree: true });
-	}
-
-	// Call the setup function to activate the listener.
-	setupPassiveInputListener();
-	// [VF-PATCH:PassiveInputListener] end
 
 	real.log("%c[EV]%c Functions hooked for %c%s%c",
 		CONFIG.formats.interesting.highlight,
