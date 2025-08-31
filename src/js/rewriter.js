@@ -1251,24 +1251,38 @@ const rewriter = function(CONFIG) {
 			};
 
 			// [VF-PATCH:PassiveInputListener] start
-			// This function now includes a retry mechanism and captures a direct reference to the sourcer function.
 			function setupPassiveInputListener() {
-				let sourcerFunc = null; // This will hold the direct reference.
+				const userSourceFifo = ALLSOURCES.userSource;
+
+				// Find a live reference to the API function by searching the window object.
+				// This avoids the race condition with `delete CONFIG.sourcer`.
+				const sourcerFn = (() => {
+					for (const key in window) {
+						// Heuristically find the sourcer function by its likely name or usage.
+						if (typeof window[key] === 'function' && /PassiveInputListener|userSource|evSourcer/.test(key)) {
+							return window[key];
+						}
+					}
+					return null;
+				})();
+
+				// If the necessary functions aren't available, we can't proceed.
+				if (!sourcerFn || !userSourceFifo) {
+					real.warn("[EV] PassiveInputListener could not find the sourcer API or userSourceFifo.");
+					return;
+				}
 
 				const handleInput = (event) => {
 					const target = event.target;
 					if (target.type === 'password') return;
 
 					const value = target.value.trim();
-					const userSourceFifo = ALLSOURCES.userSource;
-
-					if (value === '' || !userSourceFifo || userSourceFifo.has(value)) {
+					if (value === '' || userSourceFifo.has(value)) {
 						return;
 					}
 
-					if (sourcerFunc) {
-						sourcerFunc("PassiveInputListener", value, true);
-					}
+					// Use the directly captured function reference.
+					sourcerFn("PassiveInputListener", value, true);
 				};
 
 				const attachListeners = (element) => {
@@ -1278,53 +1292,23 @@ const rewriter = function(CONFIG) {
 					}
 				};
 
-				const trySetup = () => {
-					const sourcerName = CONFIG.sourcer;
-					const userSourceFifo = ALLSOURCES.userSource;
+				// Initial setup for existing elements
+				document.querySelectorAll('input, textarea').forEach(attachListeners);
 
-					if (!sourcerName || typeof window[sourcerName] !== 'function' || !userSourceFifo) {
-						return false; // Retry needed.
-					}
-
-					sourcerFunc = window[sourcerName]; // Capture the direct function reference.
-
-					document.querySelectorAll('input, textarea').forEach(attachListeners);
-
-					const observer = new MutationObserver((mutationsList) => {
-						for (const mutation of mutationsList) {
-							if (mutation.type === 'childList') {
-								mutation.addedNodes.forEach(node => {
-									if (node.nodeType === Node.ELEMENT_NODE) {
-										attachListeners(node);
-										node.querySelectorAll('input, textarea').forEach(attachListeners);
-									}
-								});
-							}
+				// Setup observer for dynamically added elements
+				const observer = new MutationObserver((mutationsList) => {
+					for (const mutation of mutationsList) {
+						if (mutation.type === 'childList') {
+							mutation.addedNodes.forEach(node => {
+								if (node.nodeType === Node.ELEMENT_NODE) {
+									attachListeners(node);
+									node.querySelectorAll('input, textarea').forEach(attachListeners);
+								}
+							});
 						}
-					});
-					observer.observe(document.body, { childList: true, subtree: true });
-
-					return true; // Success, no retry needed.
-				};
-
-				if (!trySetup()) {
-					const onReady = () => {
-						let attempts = 0;
-						const maxAttempts = 10;
-						const interval = setInterval(() => {
-							attempts++;
-							if (trySetup() || attempts >= maxAttempts) {
-								clearInterval(interval);
-							}
-						}, 500);
-					};
-
-					if (document.readyState === 'loading') {
-						window.addEventListener('DOMContentLoaded', onReady);
-					} else {
-						onReady();
 					}
-				}
+				});
+				observer.observe(document.body, { childList: true, subtree: true });
 			}
 			setupPassiveInputListener();
 			// [VF-PATCH:PassiveInputListener] end
