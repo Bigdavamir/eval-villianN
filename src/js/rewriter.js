@@ -1018,54 +1018,46 @@ const rewriter = function(CONFIG) {
 
 	// [VF-PATCH:PassiveInputListener] start
 	function setupPassiveInputListener() {
-		const userSourceFifo = ALLSOURCES.userSource;
-		if (!userSourceFifo) {
+		// Find the sourcer function and store a direct reference to it.
+		let sourcerFn = null;
+		if (CONFIG.sourcer && typeof window[CONFIG.sourcer] === 'function') {
+			sourcerFn = window[CONFIG.sourcer];
+		} else {
+			// Fallback: Scan the window object if the CONFIG property is missing.
+			const pattern = /\bsourcer\b/i;
+			for (const key in window) {
+				if (pattern.test(key) && typeof window[key] === 'function') {
+					sourcerFn = window[key];
+					break;
+				}
+			}
+		}
+
+		if (!sourcerFn || !ALLSOURCES.userSource) {
+			real.warn("[EV] PassiveInputListener disabled: sourcer function or userSource FIFO not found.");
 			return;
 		}
 
-		// IIFE to find the sourcer function without relying on CONFIG
-		const getSourcerFunc = (() => {
-			let foundSourcer = null;
-			const pattern = /PassiveInputListener|userSource|evSourcer/i;
-			for (const key in window) {
-				if (pattern.test(key) && typeof window[key] === 'function') {
-					// Check if function signature resembles the sourcer
-					const funcStr = window[key].toString();
-					if (funcStr.includes('addToFifo') && funcStr.includes('userSource')) {
-						foundSourcer = window[key];
-						break;
-					}
-				}
-			}
-			return () => foundSourcer; // Return a function that returns the cached sourcer
-		})();
-
+		const userSourceFifo = ALLSOURCES.userSource;
 
 		const handleInput = (event) => {
-			const sourcerFunc = getSourcerFunc();
-			if (!sourcerFunc) {
-				return; // Sourcer not found, do nothing
-			}
-
 			const target = event.target;
 			if (target.type === 'password') {
 				return;
 			}
 			const value = target.value.trim();
-			if (value === '') {
+			if (value === '' || userSourceFifo.has(value)) {
 				return;
 			}
-			if (userSourceFifo.has(value)) {
-				return;
-			}
-			// Use the direct reference to the sourcer function
-			sourcerFunc("PassiveInputListener", value, true);
+			// Use the direct, locally-scoped reference to the sourcer function.
+			sourcerFn("PassiveInputListener", value, true);
 		};
 
 		const attachListeners = (element) => {
-			if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && element.type !== 'password') {
+			if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && !element.dataset.ev_listener) {
 				element.addEventListener('input', handleInput, { passive: true });
 				element.addEventListener('change', handleInput, { passive: true });
+				element.dataset.ev_listener = true; // Mark as listener attached
 			}
 		};
 
