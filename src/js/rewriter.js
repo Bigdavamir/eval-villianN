@@ -1253,6 +1253,72 @@ const rewriter = function(CONFIG) {
 		}
 	}
 
+	// [VF-PATCH:PassiveInputListener] start
+	function setupPassiveInputListener() {
+		const sourcer = CONFIG.sourcer;
+		const userSourceFifo = ALLSOURCES.userSource;
+
+		// We need the sourcer API and the userSource FIFO to be available.
+		if (!sourcer || !window[sourcer] || !userSourceFifo) {
+			return;
+		}
+
+		// Handler for input/change events
+		const handleInput = (event) => {
+			const target = event.target;
+			if (target.type === 'password') {
+				return;
+			}
+
+			const value = target.value.trim();
+			if (value === '') {
+				return;
+			}
+
+			// Check for duplicates in the userSource FIFO's Set for efficiency.
+			if (userSourceFifo.has(value)) {
+				return;
+			}
+
+			// Call the global sourcer API. debug=true ensures it's persisted by the [VF-PATCH:PersistentInputs].
+			window[sourcer]("PassiveInputListener", value, true);
+		};
+
+		// Function to attach listeners to an element
+		const attachListeners = (element) => {
+			if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && element.type !== 'password') {
+				element.addEventListener('input', handleInput);
+				element.addEventListener('change', handleInput);
+			}
+		};
+
+		// Attach listeners to all existing input and textarea fields
+		document.querySelectorAll('input, textarea').forEach(attachListeners);
+
+		// Use MutationObserver to hook dynamically added elements
+		const observer = new MutationObserver((mutationsList) => {
+			for (const mutation of mutationsList) {
+				if (mutation.type === 'childList') {
+					mutation.addedNodes.forEach(node => {
+						if (node.nodeType === Node.ELEMENT_NODE) {
+							// Check the node itself if it's an input/textarea
+							attachListeners(node);
+							// Check all descendants of the node
+							node.querySelectorAll('input, textarea').forEach(attachListeners);
+						}
+					});
+				}
+			}
+		});
+
+		// Start observing the document body for added nodes
+		observer.observe(document.body, { childList: true, subtree: true });
+	}
+
+	// Call the setup function to activate the listener.
+	setupPassiveInputListener();
+	// [VF-PATCH:PassiveInputListener] end
+
 	real.log("%c[EV]%c Functions hooked for %c%s%c",
 		CONFIG.formats.interesting.highlight,
 		CONFIG.formats.interesting.default,
