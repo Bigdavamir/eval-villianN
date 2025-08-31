@@ -134,6 +134,18 @@ const defaultConfig = {
 			"pattern" : "evSourcer"
 		}
 	],
+	"powerFeatures": [
+		{
+			"name": "autoSourceFetch",
+			"pretty": "Auto-Source Fetch/XHR Responses",
+			"enabled": false
+		},
+		{
+			"name": "autoSourcePostMessage",
+			"pretty": "Auto-Source postMessage Data",
+			"enabled": false
+		}
+	],
 	"formats": [
 		{
 			"name"		: "title",
@@ -349,6 +361,8 @@ async function getConfigForRegister() {
 			config[i.name] = i.pattern;
 		}
 	}
+
+	config.powerFeatures = dbconf.powerFeatures;
 
 	for (const what of ["needles", "blacklist", "functions", "types"]) {
 		config[what] = config[what] = dbconf[what]

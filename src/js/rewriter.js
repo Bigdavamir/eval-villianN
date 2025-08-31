@@ -849,6 +849,126 @@ const rewriter = function(CONFIG) {
 			return ret ? ret : null;
 		}
 
+		const sourcer = (CONFIG.sourcerName && window[CONFIG.sourcerName]) ? window[CONFIG.sourcerName] : () => {};
+
+		// [VF-PATCH:NewSinks-ResponseSources]
+		// [VF-PATCH:IntelligentSourcing]
+		const autoSourceFetch = CONFIG.powerFeatures.find(f => f.name === 'autoSourceFetch')?.enabled;
+		if (evname === 'fetch' && autoSourceFetch) {
+			const originalFetch = window.fetch;
+			const MAX_SIZE = 51200; // 50KB
+			const ALLOWED_TYPES = ['text/html', 'application/json', 'application/javascript', 'text/plain'];
+
+			window.fetch = new Proxy(originalFetch, {
+				apply: function(target, thisArg, args) {
+					EvalVillainHook(INTRBUNDLE, 'fetch', args);
+					const result = Reflect.apply(target, thisArg, args);
+					return result.then(response => {
+						const contentType = response.headers.get('content-type') || '';
+						const contentLength = response.headers.get('content-length');
+
+						if (contentLength && parseInt(contentLength, 10) > MAX_SIZE) {
+							return response;
+						}
+						if (!ALLOWED_TYPES.some(type => contentType.includes(type))) {
+							return response;
+						}
+
+						const responseProxy = new Proxy(response, {
+							get: function(target, prop) {
+								const originalValue = target[prop];
+								if (['text', 'json'].includes(prop) && typeof originalValue === 'function') {
+									return function(...args) {
+										return originalValue.apply(target, args).then(body => {
+											const bodyStr = (typeof body === 'object') ? JSON.stringify(body) : String(body);
+											if (bodyStr.length <= MAX_SIZE && INTRBUNDLE.needles.matchAny(bodyStr)) {
+												sourcer('fetch.response', body);
+											}
+											return body;
+										});
+									};
+								}
+								return originalValue;
+							}
+						});
+						return responseProxy;
+					});
+				}
+			});
+			return;
+		}
+		if (evname === 'value(XMLHttpRequest.open)' && autoSourceFetch) {
+			const originalOpen = XMLHttpRequest.prototype.open;
+			XMLHttpRequest.prototype.open = new Proxy(originalOpen, {
+				apply: function(target, thisArg, args) {
+					EvalVillainHook(INTRBUNDLE, 'XMLHttpRequest.open', args);
+					thisArg.addEventListener('load', function() {
+						if (this.responseText) {
+							sourcer('XHR.response', this.responseText);
+						}
+					}, { passive: true });
+					return Reflect.apply(target, thisArg, args);
+				}
+			});
+			return;
+		}
+		// [VF-PATCH:IntelligentSourcing]
+		// [VF-PATCH:NewSinks-ResponseSources]
+
+		// [VF-PATCH:NewSinks-MessageAndSocketSources]
+		// [VF-PATCH:IntelligentSourcing]
+		const autoSourcePostMessage = CONFIG.powerFeatures.find(f => f.name === 'autoSourcePostMessage')?.enabled;
+		const recentMessages = new Set();
+		if (evname === 'window.addEventListener' && autoSourcePostMessage) {
+			const originalAddEventListener = window.addEventListener;
+			window.addEventListener = new Proxy(originalAddEventListener, {
+				apply: function(target, thisArg, args) {
+					const [type, listener] = args;
+					if (type === 'message') {
+						const wrappedListener = function(event) {
+							const msgData = (typeof event.data === 'object') ? JSON.stringify(event.data) : String(event.data);
+							const msgKey = msgData.substring(0, 256); // Use a substring as a key for deduplication
+							if (!recentMessages.has(msgKey)) {
+								sourcer('postMessage.data', event.data);
+								recentMessages.add(msgKey);
+								setTimeout(() => recentMessages.delete(msgKey), 5000); // Clear after 5 seconds
+							}
+							return listener.apply(this, arguments);
+						};
+						args[1] = wrappedListener;
+					}
+					EvalVillainHook(INTRBUNDLE, 'window.addEventListener', args);
+					return Reflect.apply(target, thisArg, args);
+				}
+			});
+			return;
+		}
+		// [VF-PATCH:IntelligentSourcing]
+		if (evname === 'WebSocket') { // WebSocket sourcing is not behind a power feature flag for now
+			const originalWebSocket = window.WebSocket;
+			window.WebSocket = new Proxy(originalWebSocket, {
+				construct: function(target, args) {
+					EvalVillainHook(INTRBUNDLE, 'new WebSocket()', args);
+					const instance = Reflect.construct(target, args);
+					return new Proxy(instance, {
+						set: function(target, prop, value) {
+							if (prop === 'onmessage' && typeof value === 'function') {
+								target[prop] = function(event) {
+									sourcer('WebSocket.onmessage', event.data);
+									return value.apply(this, arguments);
+								};
+							} else {
+								target[prop] = value;
+							}
+							return true;
+						}
+					});
+				}
+			});
+			return;
+		}
+		// [VF-PATCH:NewSinks-MessageAndSocketSources]
+
 		const ownprop = /^(set|value)\(([a-zA-Z.]+)\)\s*$/.exec(evname);
 		const ep = new evProxy(INTRBUNDLE);
 		ep.evname = evname;
@@ -964,44 +1084,197 @@ const rewriter = function(CONFIG) {
 
 	// [VF-PATCH:FrameworkSinkHooks] start
 	function hookFrameworks() {
-		const sourcer = CONFIG.sourcer;
-		if (!sourcer || !window[sourcer]) {
-			// We need the sourcer API to feed data from frameworks back into Eval Villain.
-			return;
+		// Note: The sourcer is now guaranteed to be on the window object by the PassiveInputListener patch.
+		const sourcerName = CONFIG.sourcerName;
+		const sourcer = window[sourcerName];
+
+		// [VF-PATCH:FrameworkSinkHooks-ShadowRoot]
+		try {
+			if (typeof ShadowRoot !== 'undefined' && ShadowRoot.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'innerHTML');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(ShadowRoot.innerHTML)';
+					Object.defineProperty(ShadowRoot.prototype, 'innerHTML', { set: new Proxy(originalSetter, proxy) });
+				}
+			}
+		} catch (e) { real.warn('[EV] Failed to hook ShadowRoot.prototype.innerHTML:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-insertAdjacentHTML]
+		try {
+			if (Element.prototype.insertAdjacentHTML) {
+				const originalMethod = Element.prototype.insertAdjacentHTML;
+				const proxy = new evProxy(INTRBUNDLE);
+				proxy.evname = 'Element.insertAdjacentHTML';
+				Element.prototype.insertAdjacentHTML = new Proxy(originalMethod, proxy);
+			}
+		} catch (e) { real.warn('[EV] Failed to hook Element.prototype.insertAdjacentHTML:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-RangeContext]
+		try {
+			if (Range.prototype.createContextualFragment) {
+				const originalMethod = Range.prototype.createContextualFragment;
+				const proxy = new evProxy(INTRBUNDLE);
+				proxy.evname = 'Range.createContextualFragment';
+				Range.prototype.createContextualFragment = new Proxy(originalMethod, proxy);
+			}
+		} catch (e) { real.warn('[EV] Failed to hook Range.prototype.createContextualFragment:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-DOMParser]
+		try {
+			if (DOMParser.prototype.parseFromString) {
+				const originalMethod = DOMParser.prototype.parseFromString;
+				const proxy = {
+					apply: function(target, thisArg, args) {
+						const [string, type] = args;
+						if (type === 'text/html') {
+							EvalVillainHook(INTRBUNDLE, 'DOMParser.parseFromString', [string]);
+						}
+						return Reflect.apply(target, thisArg, args);
+					}
+				};
+				DOMParser.prototype.parseFromString = new Proxy(originalMethod, proxy);
+			}
+		} catch (e) { real.warn('[EV] Failed to hook DOMParser.prototype.parseFromString:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-HTMLDocumentCreate]
+		try {
+			if (Document.prototype.implementation && Document.prototype.implementation.createHTMLDocument) {
+				const originalMethod = Document.prototype.implementation.createHTMLDocument;
+				const proxy = new evProxy(INTRBUNDLE);
+				proxy.evname = 'Document.implementation.createHTMLDocument';
+				Document.prototype.implementation.createHTMLDocument = new Proxy(originalMethod, proxy);
+			}
+		} catch (e) { real.warn('[EV] Failed to hook Document.implementation.createHTMLDocument:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-iframeSrcdoc]
+		try {
+			if (typeof HTMLIFrameElement !== 'undefined' && HTMLIFrameElement.prototype) {
+				 const descriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc');
+				 if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(HTMLIFrameElement.srcdoc)';
+					Object.defineProperty(HTMLIFrameElement.prototype, 'srcdoc', { set: new Proxy(originalSetter, proxy) });
+				 }
+			}
+		} catch(e) { real.warn('[EV] Failed to hook HTMLIFrameElement.prototype.srcdoc:', e); }
+
+		// [VF-PATCH:FrameworkSinkHooks-outerHTML]
+		try {
+			if (typeof Element !== 'undefined' && Element.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(Element.outerHTML)';
+					Object.defineProperty(Element.prototype, 'outerHTML', { set: new Proxy(originalSetter, proxy) });
+				}
+			}
+		} catch (e) { real.warn('[EV] Failed to hook Element.prototype.outerHTML:', e); }
+
+		// [VF-PATCH:NewSinks-document.domain]
+		try {
+			if (typeof Document !== 'undefined' && Document.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'domain');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(document.domain)';
+					Object.defineProperty(Document.prototype, 'domain', {
+						set: new Proxy(originalSetter, proxy)
+					});
+				}
+			}
+		} catch (e) {
+			real.warn('[EV] Failed to hook document.domain:', e);
 		}
 
-		// --- Shadow DOM Hook ---
+		// [VF-PATCH:FrameworkSinkHooks-srcHrefJS]
+		const hookDangerousUrlScheme = (proto, prop) => {
+			try {
+				if (typeof proto !== 'undefined' && proto.prototype) {
+					const descriptor = Object.getOwnPropertyDescriptor(proto.prototype, prop);
+					if (descriptor && descriptor.set) {
+						const originalSetter = descriptor.set;
+						const proxy = {
+							apply: function(target, thisArg, args) {
+								const value = args[0];
+								if (typeof value === 'string') {
+									const lowerValue = value.trim().toLowerCase();
+									if (lowerValue.startsWith('javascript:') || lowerValue.startsWith('data:')) {
+										EvalVillainHook(INTRBUNDLE, `set(${proto.name}.${prop})`, [value]);
+									}
+								}
+								return Reflect.apply(target, thisArg, args);
+							}
+						};
+						Object.defineProperty(proto.prototype, prop, { set: new Proxy(originalSetter, proxy) });
+					}
+				}
+			} catch (e) { real.warn(`[EV] Failed to hook ${proto.name}.prototype.${prop}:`, e); }
+		};
+		hookDangerousUrlScheme(HTMLAnchorElement, 'href');
+		hookDangerousUrlScheme(HTMLLinkElement, 'href');
+		hookDangerousUrlScheme(HTMLScriptElement, 'src');
+		hookDangerousUrlScheme(HTMLImageElement, 'src');
+
+		// [VF-PATCH:FrameworkSinkHooks-styleHTML]
+		try {
+			if (typeof HTMLStyleElement !== 'undefined' && HTMLStyleElement.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(HTMLStyleElement.prototype, 'innerHTML');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(HTMLStyleElement.innerHTML)';
+					Object.defineProperty(HTMLStyleElement.prototype, 'innerHTML', { set: new Proxy(originalSetter, proxy) });
+				}
+			}
+		} catch (e) { real.warn('[EV] Failed to hook HTMLStyleElement.prototype.innerHTML:', e); }
+		try {
+			if (typeof CSSStyleSheet !== 'undefined' && CSSStyleSheet.prototype) {
+				const descriptor = Object.getOwnPropertyDescriptor(CSSStyleSheet.prototype, 'cssText');
+				if (descriptor && descriptor.set) {
+					const originalSetter = descriptor.set;
+					const proxy = new evProxy(INTRBUNDLE);
+					proxy.evname = 'set(CSSStyleSheet.cssText)';
+					Object.defineProperty(CSSStyleSheet.prototype, 'cssText', { set: new Proxy(originalSetter, proxy) });
+				}
+			}
+		} catch (e) { real.warn('[EV] Failed to hook CSSStyleSheet.prototype.cssText:', e); }
+
+		// --- Existing framework source hooks ---
+		if (!sourcer) return; // The rest of these hooks need the sourcer API
+
 		try {
 			const origAttachShadow = Element.prototype.attachShadow;
 			Element.prototype.attachShadow = function (options) {
 				const shadowRoot = origAttachShadow.call(this, options);
-				// After creating the shadow root, scan it for interesting sinks.
 				const scripts = shadowRoot.querySelectorAll('script');
 				scripts.forEach((script, i) => {
 					if (script.src) {
-						window[sourcer](`ShadowDOM.script[${i}].src`, script.src);
+						sourcer(`ShadowDOM.script[${i}].src`, script.src);
 					}
 					if (script.innerHTML) {
-						window[sourcer](`ShadowDOM.script[${i}].innerHTML`, script.innerHTML);
+						sourcer(`ShadowDOM.script[${i}].innerHTML`, script.innerHTML);
 					}
 				});
 				return shadowRoot;
 			};
-		} catch(e) { real.warn('[EV] Failed to hook Shadow DOM:', e); }
-
-		// --- React Hook ---
+		} catch(e) { real.warn('[EV] Failed to hook Shadow DOM sources:', e); }
 		try {
 			if (window.React && window.React.createElement) {
 				const origCreateElement = window.React.createElement;
 				window.React.createElement = function(type, props, ...children) {
 					if (props) {
 						if (props.dangerouslySetInnerHTML && props.dangerouslySetInnerHTML.__html) {
-							window[sourcer]('React.dangerouslySetInnerHTML', props.dangerouslySetInnerHTML.__html);
+							sourcer('React.dangerouslySetInnerHTML', props.dangerouslySetInnerHTML.__html);
 						}
 						for (const propName in props) {
 							if (propName.toLowerCase() === 'href' || propName.toLowerCase() === 'src' || propName.toLowerCase().startsWith('on')) {
 								if (typeof props[propName] === 'string') {
-									window[sourcer](`React.prop[${propName}]`, props[propName]);
+									sourcer(`React.prop[${propName}]`, props[propName]);
 								}
 							}
 						}
@@ -1010,8 +1283,6 @@ const rewriter = function(CONFIG) {
 				};
 			}
 		} catch(e) { real.warn('[EV] Failed to hook React:', e); }
-
-		// --- Vue Hook ---
 		try {
 			if (window.Vue && window.Vue.prototype && window.Vue.prototype.$mount) {
 				const origMount = window.Vue.prototype.$mount;
@@ -1020,7 +1291,7 @@ const rewriter = function(CONFIG) {
 						for (const key in this.$props) {
 							const propVal = this.$props[key];
 							if (typeof propVal === 'string') {
-								 window[sourcer](`Vue.prop[${key}]`, propVal);
+								 sourcer(`Vue.prop[${key}]`, propVal);
 							}
 						}
 					}
@@ -1028,13 +1299,6 @@ const rewriter = function(CONFIG) {
 				}
 			}
 		} catch(e) { real.warn('[EV] Failed to hook Vue:', e); }
-
-		// --- Angular Hook (Best-Effort) ---
-		try {
-			if (window.ng && window.ng.probe) { // ng.probe is for older Angular in debug mode
-				real.log('[EV] Angular detected (debug mode). Advanced hooking not yet implemented in this patch.');
-			}
-		} catch(e) { real.warn('[EV] Failed to hook Angular:', e); }
 	}
 	// [VF-PATCH:FrameworkSinkHooks] end
 
@@ -1287,79 +1551,41 @@ const rewriter = function(CONFIG) {
 		delete CONFIG.sinker;
 	}
 
-	if (CONFIG.sourcer) {
-		const fmt = CONFIG.formats.userSource;
-		if (fmt.use) {
-			const srcer = CONFIG.sourcer;
-			ALLSOURCES.userSource = new SourceFifo(fmt.limit);
-			window[srcer] = (src_name, src_val, debug=false) => {
-				// ex: evSourcer("Response from fetch", resp.json(), true)
-				// debug=true results in a console.debug for each source injested
-				if (debug) {
-					const o = typeof(src_val) === 'string'? src_val: real.JSON.stringify(src_val);
-					real.debug(`[EV] ${srcer}[${src_name}] from ${document.location.origin}  added:\n ${o}`);
-				}
-				addToFifo({
-					display: `${srcer}[${src_name}]`,
-					search: src_val,
-					}, "userSource");
-				return false;
-			}
-			delete CONFIG.sourcer;
-		}
-	}
-
 	// [VF-PATCH:PassiveInputListener] start
 	function setupPassiveInputListener() {
-		const sourcer = CONFIG.sourcer;
 		const userSourceFifo = ALLSOURCES.userSource;
+		const sourcerFn = window[CONFIG.sourcerName];
 
-		// We need the sourcer API and the userSource FIFO to be available.
-		if (!sourcer || !window[sourcer] || !userSourceFifo) {
+		if (!sourcerFn || !userSourceFifo) {
+			real.warn("[EV] PassiveInputListener disabled: sourcer function or userSource FIFO not found.");
 			return;
 		}
 
-		// Handler for input/change events
 		const handleInput = (event) => {
 			const target = event.target;
-			if (target.type === 'password') {
-				return;
-			}
+			if (target.type === 'password') return;
 
 			const value = target.value.trim();
-			if (value === '') {
-				return;
-			}
+			if (value === '' || userSourceFifo.has(value)) return;
 
-			// Check for duplicates in the userSource FIFO's Set for efficiency.
-			if (userSourceFifo.has(value)) {
-				return;
-			}
-
-			// Call the global sourcer API. debug=true ensures it's persisted by the [VF-PATCH:PersistentInputs].
-			window[sourcer]("PassiveInputListener", value, true);
+			sourcerFn("PassiveInputListener", value, true);
 		};
 
-		// Function to attach listeners to an element
 		const attachListeners = (element) => {
-			if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && element.type !== 'password') {
-				element.addEventListener('input', handleInput);
-				element.addEventListener('change', handleInput);
+			if ((element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') && !element.dataset.ev_listener) {
+				element.addEventListener('change', handleInput, { passive: true });
+				element.dataset.ev_listener = true;
 			}
 		};
 
-		// Attach listeners to all existing input and textarea fields
 		document.querySelectorAll('input, textarea').forEach(attachListeners);
 
-		// Use MutationObserver to hook dynamically added elements
 		const observer = new MutationObserver((mutationsList) => {
 			for (const mutation of mutationsList) {
 				if (mutation.type === 'childList') {
 					mutation.addedNodes.forEach(node => {
 						if (node.nodeType === Node.ELEMENT_NODE) {
-							// Check the node itself if it's an input/textarea
 							attachListeners(node);
-							// Check all descendants of the node
 							node.querySelectorAll('input, textarea').forEach(attachListeners);
 						}
 					});
@@ -1367,13 +1593,41 @@ const rewriter = function(CONFIG) {
 			}
 		});
 
-		// Start observing the document body for added nodes
-		observer.observe(document.body, { childList: true, subtree: true });
+		observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
 	}
 
-	// Call the setup function to activate the listener.
-	setupPassiveInputListener();
+	// This logic ensures the `evSourcer` function is always available on the window,
+	// preventing "is not defined" errors. The function internally checks if the feature
+	// is enabled in the configuration before processing any data.
+	const sourcerName = (CONFIG.globals.find(g => g.name === 'sourcer' && g.enabled) || {}).pattern || 'evSourcer';
+	CONFIG.sourcerName = sourcerName;
+
+	const sourcerFunc = (src_name, src_val, debug=false) => {
+		const fmt = CONFIG.formats.userSource;
+		if (fmt && fmt.use) {
+			if (!ALLSOURCES.userSource) {
+				ALLSOURCES.userSource = new SourceFifo(fmt.limit);
+			}
+			if (debug) {
+				const o = typeof(src_val) === 'string'? src_val: real.JSON.stringify(src_val);
+				real.debug(`[EV] ${sourcerName}[${src_name}] from ${document.location.origin}  added:\n ${o}`);
+			}
+			addToFifo({ display: `${sourcerName}[${src_name}]`, search: src_val }, "userSource");
+		} else {
+			real.warn(`[EV] evSourcer called, but 'User Sources' feature is disabled in config.`);
+		}
+		return false;
+	};
+
+	window[sourcerName] = sourcerFunc;
+
+	try {
+		setupPassiveInputListener();
+	} catch (e) {
+		real.error("[EV] Error during PassiveInputListener initialization:", e);
+	}
 	// [VF-PATCH:PassiveInputListener] end
+
 
 	real.log("%c[EV]%c Functions hooked for %c%s%c",
 		CONFIG.formats.interesting.highlight,
