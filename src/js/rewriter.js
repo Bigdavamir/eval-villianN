@@ -1,4 +1,3 @@
-// Trivial change to test the pull request submission process.
 /* Eval Villain just jams this rewriter function into the loading page, with
  * some JSON as CONFIG. Normally Firefox does this for you from the
  * background.js file. But you could always copy paste this code anywhere you
@@ -1017,34 +1016,33 @@ const rewriter = function(CONFIG) {
 	}
 
 	// [VF-FIX:InitAndSourcerFix] start
-	// Decouple the sourcer API creation from the configuration format check.
-	// This ensures `window.evSourcer` is always available for manual console use,
-	// even if the `userSource` FIFO is not actively used for logging.
-	if (CONFIG.sourcer) {
-		const srcer = CONFIG.sourcer;
-		CONFIG.sourcerName = srcer; // Save for other patches to use.
+	// This logic ensures the `evSourcer` function is always available on the window,
+	// preventing "is not defined" errors. The function internally checks if the feature
+	// is enabled in the configuration before processing any data.
+	const sourcerName = CONFIG.sourcer || 'evSourcer'; // Use configured name or default
+	CONFIG.sourcerName = sourcerName; // Save for other patches to use.
 
-		// Define the sourcer function.
-		const sourcerFunc = (src_name, src_val, debug=false) => {
-			const fmt = CONFIG.formats.userSource;
-			// Only add to FIFO if the format is enabled.
-			if (fmt && fmt.use) {
-				// Ensure the userSource FIFO exists.
-				if (!ALLSOURCES.userSource) {
-					ALLSOURCES.userSource = new SourceFifo(fmt.limit);
-				}
-				if (debug) {
-					const o = typeof(src_val) === 'string'? src_val: real.JSON.stringify(src_val);
-					real.debug(`[EV] ${srcer}[${src_name}] from ${document.location.origin}  added:\n ${o}`);
-				}
-				addToFifo({ display: `${srcer}[${src_name}]`, search: src_val }, "userSource");
+	const sourcerFunc = (src_name, src_val, debug=false) => {
+		const fmt = CONFIG.formats.userSource;
+		// Only add to FIFO if the format is configured and enabled.
+		if (fmt && fmt.use) {
+			// Ensure the userSource FIFO exists.
+			if (!ALLSOURCES.userSource) {
+				ALLSOURCES.userSource = new SourceFifo(fmt.limit);
 			}
-			return false;
-		};
+			if (debug) {
+				const o = typeof(src_val) === 'string'? src_val: real.JSON.stringify(src_val);
+				real.debug(`[EV] ${sourcerName}[${src_name}] from ${document.location.origin}  added:\n ${o}`);
+			}
+			addToFifo({ display: `${sourcerName}[${src_name}]`, search: src_val }, "userSource");
+		} else {
+			real.warn(`[EV] evSourcer called, but 'User Sources' feature is disabled in config.`);
+		}
+		return false;
+	};
 
-		// Always expose the sourcer function to the global scope.
-		window[srcer] = sourcerFunc;
-	}
+	// Always expose the sourcer function to the global scope.
+	window[sourcerName] = sourcerFunc;
 	// [VF-FIX:InitAndSourcerFix] end
 
 	// [VF-PATCH:PassiveInputListener] start
