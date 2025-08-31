@@ -1,4 +1,4 @@
-const configList = ["targets", "needles",  "blacklist", "functions", "globals"];
+const configList = ["targets", "needles",  "blacklist", "functions", "globals", "types", "powerfeatures"];
 const normalHeaders = ["enabled", "name", "pattern"];
 
 function getTableData(tblName) {
@@ -263,15 +263,18 @@ function onLoad() {
 
 	// set onclick events to default buttons
 	for (const i of configList) {
-		if (i != "globals") {
+		if (i != "globals" && i != "powerfeatures" && i != "types") {
 			document.getElementById(`add-${i}`).onclick = function() {
 				appendDefault(i);
 				unsavedTable(i);
 			}
 		}
-		document.getElementById(`save-${i}`).onclick = function() {
-			saveTable(i)
-				.then(() => unsavedTable(i)); // fix formating, should clear
+		// types and powerfeatures don't have an add button, globals doesn't have a save
+		if (i != "globals") {
+			document.getElementById(`save-${i}`).onclick = function() {
+				saveTable(i)
+					.then(() => unsavedTable(i));
+			}
 		}
 	}
 
@@ -283,8 +286,97 @@ function onLoad() {
 	);
 	// TODO better DB in future, sipler code
 	populateFormats();
+	populatePowerFeatures();
 
 	setCopyHandlers();
+}
+
+// Power features are also a special table type
+async function populatePowerFeatures() {
+	function createPfRow(pf) {
+		const row = document.createElement("div");
+		row.className = "row";
+
+		const enabledCell = document.createElement("div");
+		enabledCell.className = "col-sm";
+		const enabledDiv = document.createElement("div");
+		enabledDiv.className = "cell";
+		const label = document.createElement("label");
+		label.className = "switch";
+		const input = document.createElement("input");
+		input.type = "checkbox";
+		input.name = pf.name;
+		input.checked = pf.enabled;
+		input.onclick = () => unsavedPowerFeatures();
+		const slider = document.createElement("div");
+		slider.className = "slider";
+		label.appendChild(input);
+		label.appendChild(slider);
+		enabledDiv.appendChild(label);
+		enabledCell.appendChild(enabledDiv);
+
+		const nameCell = document.createElement("div");
+		nameCell.className = "col-lg";
+		const nameDiv = createField("pretty", pf.pretty, true);
+		nameCell.appendChild(nameDiv);
+
+		row.appendChild(enabledCell);
+		row.appendChild(nameCell);
+		return row;
+	}
+
+	const { powerFeatures } = await browser.storage.local.get("powerFeatures");
+	if (!powerFeatures) {
+		console.error("could not get powerFeatures from storage");
+		return false;
+	}
+
+	const pfTbl = document.getElementById("powerfeatures-form");
+	powerFeatures.forEach(pf => {
+		pfTbl.appendChild(createPfRow(pf));
+	});
+
+	document.getElementById("save-powerfeatures").onclick = () => savePowerFeatures();
+	unsavedPowerFeatures(); // Initial check
+}
+
+async function savePowerFeatures() {
+	const { powerFeatures } = await browser.storage.local.get("powerFeatures");
+	const form = document.getElementById("powerfeatures-form");
+
+	for (const feature of powerFeatures) {
+		const input = form.querySelector(`input[name='${feature.name}']`);
+		if (input) {
+			feature.enabled = input.checked;
+		}
+	}
+
+	await browser.storage.local.set({ powerFeatures });
+	return updateBackground().then(() => unsavedPowerFeatures());
+}
+
+async function unsavedPowerFeatures() {
+	const { powerFeatures } = await browser.storage.local.get("powerFeatures");
+	const form = document.getElementById("powerfeatures-form");
+	let isDirty = false;
+
+	if (!powerFeatures) return; // Not loaded yet
+
+	for (const feature of powerFeatures) {
+		const input = form.querySelector(`input[name='${feature.name}']`);
+		if (input && input.checked !== feature.enabled) {
+			isDirty = true;
+			break;
+		}
+	}
+
+	const butt = document.getElementById("save-powerfeatures");
+	if (isDirty) {
+		butt.classList.remove("saved");
+		butt.disabled = false;
+	} else {
+		butt.disabled = true;
+	}
 }
 
 // formats and limits are different table types, so handled seperatly

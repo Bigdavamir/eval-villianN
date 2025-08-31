@@ -410,16 +410,14 @@ async function register() {
 		return;
 	}
 
-	const code = `config = ${JSON.stringify(config)};`;
-
+	const code = `window.EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};`;
 
 	// firefox >=59, not supported in chrome...
 	this.unreg = await browser.contentScripts.register({
 		matches: match,
 		js: [
-			{code: code}, 					// contains configuration for rewriter
-			{file: "/js/rewriter.js"},		// Has actual code that gets injected into the page
-			{file: "/js/switcheroo.js"}		// cause the injection
+			{ code: code },                // sets the config on the window
+			{ file: "/js/injector.js" }    // creates a script tag to inject rewriter.js
 		],
 		runAt: "document_start",
 		allFrames: true
@@ -517,6 +515,13 @@ browser.webNavigation.onBeforeNavigate.addListener((details) => {
 	});
 }, { url: [{ schemes: ["http", "https"] }] });
 
+browser.webNavigation.onCommitted.addListener((details) => {
+	if (details.frameId !== 0) {
+		return;
+	}
+	// This is for testing and analysis as requested.
+	console.log(`[EV] Navigation Committed: URL=${details.url}, Type=${details.transitionType}`);
+});
 
 browser.runtime.onMessage.addListener(handleMessage);
 browser.runtime.onInstalled.addListener(handleInstalled);

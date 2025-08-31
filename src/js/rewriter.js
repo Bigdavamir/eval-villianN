@@ -1,9 +1,11 @@
-/* Eval Villain just jams this rewriter function into the loading page, with
- * some JSON as CONFIG. Normally Firefox does this for you from the
- * background.js file. But you could always copy paste this code anywhere you
- * want. Such as into a proxie'd response or electron instramentation.
- */
-const rewriter = function(CONFIG) {
+// This script is injected into the page context.
+(function() {
+	// CONFIG is set by the injector script on the window object.
+	const CONFIG = window.EVAL_VILLAIN_CONFIG;
+	if (!CONFIG) {
+		console.error("[EV] Config not found. Aborting injection.");
+		return;
+	}
 	// handled this way to preserve encoding...
 	function getAllQueryParams(search) {
 		return search.substr(search[0] == '?'? 1: 0)
@@ -212,9 +214,22 @@ const rewriter = function(CONFIG) {
 				const s = sObj.search;
 				if (typeof s === 'string' && s.length > 0) {
 					browser.storage.local.get(EV_PERSISTENT_SOURCES_KEY, (result) => {
-						const persisted = result[EV_PERSISTENT_SOURCES_KEY] || [];
+						let persisted = result[EV_PERSISTENT_SOURCES_KEY] || [];
 						if (!persisted.includes(s)) {
 							persisted.push(s);
+
+							// Check storage size and prune if necessary to avoid QUOTA_BYTES_PER_ITEM error
+							const MAX_STORAGE_SIZE = 4500000; // 4.5 MB to be safe
+							let currentSize = JSON.stringify(persisted).length;
+
+							if (currentSize > MAX_STORAGE_SIZE) {
+								real.warn(`[EV] Persistent storage near quota limit (${(currentSize / 1024 / 1024).toFixed(2)}MB). Pruning oldest entries.`);
+								while (currentSize > MAX_STORAGE_SIZE && persisted.length > 1) {
+									persisted.shift(); // Remove the oldest entry
+									currentSize = JSON.stringify(persisted).length;
+								}
+							}
+
 							browser.storage.local.set({ [EV_PERSISTENT_SOURCES_KEY]: persisted });
 						}
 					});
@@ -1585,4 +1600,4 @@ const rewriter = function(CONFIG) {
 		document.location.origin,
 		CONFIG.formats.interesting.default
 	);
-}
+})();

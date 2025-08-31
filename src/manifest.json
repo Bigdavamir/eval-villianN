@@ -30,5 +30,9 @@
 		"toggle": {
 			"description": "Toggle Eval Villain"
 		}
-	}
+	},
+
+	"web_accessible_resources": [
+		"/js/rewriter.js"
+	]
 }
