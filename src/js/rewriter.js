@@ -266,6 +266,42 @@
 
 	let rotateWarnAt = 8;
 
+	/**
+	 * Saves a given source string to the persistent list in browser storage,
+	 * automatically handling storage quota by removing the oldest entries if needed.
+	 * @param {string} source - The string to save.
+	 */
+	function savePersistentSourceSafe(source) {
+		const EV_PERSISTENT_SOURCES_KEY = 'evalvillain_persistent_sources';
+		try {
+			if (typeof source !== 'string' || source.length === 0) {
+				return;
+			}
+			browser.storage.local.get(EV_PERSISTENT_SOURCES_KEY, (result) => {
+				if (browser.runtime.lastError) { return; } // Silently fail if storage is unavailable.
+
+				let persisted = result[EV_PERSISTENT_SOURCES_KEY] || [];
+				if (!persisted.includes(source)) {
+					persisted.push(source);
+
+					const MAX_STORAGE_SIZE = 4500000; // 4.5 MB
+					let currentSize = JSON.stringify(persisted).length;
+
+					if (currentSize > MAX_STORAGE_SIZE) {
+						real.warn(`[EV] Persistent storage near quota limit. Pruning oldest entries.`);
+						while (currentSize > MAX_STORAGE_SIZE && persisted.length > 1) {
+							persisted.shift();
+							currentSize = JSON.stringify(persisted).length;
+						}
+					}
+					browser.storage.local.set({ [EV_PERSISTENT_SOURCES_KEY]: persisted });
+				}
+			});
+		} catch (e) {
+			real.warn('[EV] Error with persistent sources:', e);
+		}
+	}
+
 	// set of strings to search for
 	function addToFifo(sObj, fifoName) { // TODO: add blacklist arg
 		// [VF-PATCH:TimelineTracking] start
@@ -274,39 +310,13 @@
 			sObj.origin = location.href;
 		}
 		// [VF-PATCH:TimelineTracking] end
-		// [VF-PATCH:PersistentInputs] start
-		const EV_PERSISTENT_SOURCES_KEY = 'evalvillain_persistent_sources';
-		try {
-			// Persist sources that are explicitly provided by the user via the sourcer API.
-			if (fifoName === 'userSource') {
-				const s = sObj.search;
-				if (typeof s === 'string' && s.length > 0) {
-					browser.storage.local.get(EV_PERSISTENT_SOURCES_KEY, (result) => {
-						let persisted = result[EV_PERSISTENT_SOURCES_KEY] || [];
-						if (!persisted.includes(s)) {
-							persisted.push(s);
 
-							// Check storage size and prune if necessary to avoid QUOTA_BYTES_PER_ITEM error
-							const MAX_STORAGE_SIZE = 4500000; // 4.5 MB to be safe
-							let currentSize = JSON.stringify(persisted).length;
-
-							if (currentSize > MAX_STORAGE_SIZE) {
-								real.warn(`[EV] Persistent storage near quota limit (${(currentSize / 1024 / 1024).toFixed(2)}MB). Pruning oldest entries.`);
-								while (currentSize > MAX_STORAGE_SIZE && persisted.length > 1) {
-									persisted.shift(); // Remove the oldest entry
-									currentSize = JSON.stringify(persisted).length;
-								}
-							}
-
-							browser.storage.local.set({ [EV_PERSISTENT_SOURCES_KEY]: persisted });
-						}
-					});
-				}
-			}
-		} catch (e) {
-			real.warn('[EV] Error with persistent sources:', e);
+		// [VF-PATCH:PersistentInputs]
+		// Persist sources that are explicitly provided by the user via the sourcer API.
+		if (fifoName === 'userSource') {
+			savePersistentSourceSafe(sObj.search);
 		}
-		// [VF-PATCH:PersistentInputs] end
+
 		const fifo = ALLSOURCES[fifoName];
 		if (!fifo) {
 			throw `No ${fifoName}`;
