@@ -830,13 +830,11 @@ function getInterest(argObj, intrBundle) {
 			const f = getFunc(ownprop[2]);
 			const orig = Object.getOwnPropertyDescriptor(f.where.prototype, f.leaf)[prop];
 			Object.defineProperty(f.where.prototype, f.leaf, {[prop] : new Proxy(orig, ep)});
-			real.log("[HOOKED] %s", evname);
 		} else if (!/^[a-zA-Z.]+$/.test(evname)) {
 			real.log("[EV] name: %s invalid, not hooking", evname);
 		} else {
 			const f = getFunc(evname);
 			f.where[f.leaf] = new Proxy(f.where[f.leaf], ep);
-			real.log("[HOOKED] %s", evname);
 		}
 	}
 

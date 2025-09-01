@@ -342,6 +342,7 @@ async function checkStorage() {
 }
 
 async function getConfigForRegister() {
+    await checkStorage();
 	const dbconf = await browser.storage.local.get(Object.keys(defaultConfig));
 	const config = {};
 	config.formats = {};
@@ -377,7 +378,7 @@ async function getConfigForRegister() {
 
 async function register() {
 	if (unreg != null) {
-		await removeScript(false);
+		return; // Already registered
 	}
 	const [config, match] = await getConfigForRegister();
 	if (config.functions.length === 0) {
@@ -401,7 +402,7 @@ async function register() {
 
 async function removeScript(icon=true) {
 	if (unreg) {
-		unreg.unregister();
+		await unreg.unregister();
 	}
 	unreg = null;
 	if (icon) {
@@ -454,43 +455,37 @@ function handleMessage(request, sender, _sendResponse) {
 	}
 }
 
-async function initialize(isInstall) {
-    if (isInstall) {
-        debugLog("[EV DEBUG] First install");
-        await browser.storage.local.clear();
+async function initialize() {
+    const { evalVillainActive, ...storedConfig } = await browser.storage.local.get(['evalVillainActive']);
+    const isPristine = Object.keys(storedConfig).length === 0;
+
+    // On a truly fresh install (or after a clear), storage is empty.
+    if (isPristine) {
+        debugLog("[EV DEBUG] Pristine storage detected, running first-time setup.");
         await checkStorage();
         await browser.storage.local.set({ 'evalVillainActive': true });
-    } else {
-        await checkStorage();
-    }
-
-    const result = await browser.storage.local.get('evalVillainActive');
-    if (result.evalVillainActive) {
         await register();
+    } else {
+        // On subsequent startups, just ensure config is valid and register if needed.
+        await checkStorage();
+        if (evalVillainActive) {
+            await register();
+        }
     }
 }
 
 browser.runtime.onInstalled.addListener(details => {
     debug = details.temporary || false;
+    // The startup logic handles initialization now, but we can log the install/update reason.
     if (details.reason === "install") {
-        initialize(true);
-    } else if (details.reason === "update") {
-        initialize(false);
-    }
+		debugLog("[EV DEBUG] onInstalled reason: install");
+	} else if (details.reason === "update") {
+		debugLog("[EV DEBUG] onInstalled reason: update");
+	}
 });
 
-(async () => {
-    // This runs on every browser startup and extension reload
-    const result = await browser.storage.local.get('evalVillainActive');
-    if (result.evalVillainActive === undefined) {
-        // If the flag is not set, it's likely a startup after the extension was added
-        // without going through the install flow (e.g. from source).
-        // We'll treat it as an install.
-        await initialize(true);
-    } else if (result.evalVillainActive) {
-        await initialize(false);
-    }
-})();
+// Main entry point for the background script
+initialize().catch(console.error);
 
 browser.runtime.onMessage.addListener(handleMessage);
 browser.commands.onCommand.addListener(command => {
