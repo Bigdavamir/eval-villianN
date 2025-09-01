@@ -17,11 +17,10 @@ global.browser = {
         addListener: jest.fn(),
     },
     getURL: jest.fn(path => `moz-extension://<uuid>${path}`),
+    sendMessage: jest.fn().mockResolvedValue(),
   },
   storage: {
     local: {
-      // We need to provide a default value for the get call,
-      // otherwise the startup sequence in background.js will fail.
       get: jest.fn().mockResolvedValue({ evalVillainActive: true }),
       set: jest.fn().mockResolvedValue(),
       clear: jest.fn().mockResolvedValue(),
@@ -44,7 +43,12 @@ const { arraysEqual, defaultConfig } = require('../src/js/background.js');
 // We need to mock the implementation of 'get' again here because the
 // background script will have been loaded and the mock above will have been
 // used. For the actual tests, we want to return the full defaultConfig.
-browser.storage.local.get.mockResolvedValue(defaultConfig);
+browser.storage.local.get.mockImplementation(keys => {
+    if (Array.isArray(keys) && keys.includes('evalVillainActive')) {
+        return Promise.resolve({ evalVillainActive: true });
+    }
+    return Promise.resolve(defaultConfig);
+});
 
 
 describe('arraysEqual', () => {
