@@ -311,13 +311,14 @@ function debugLog() {
 
 async function checkStorage() {
 	const dbconf = await getAllConf();
+	const promises = [];
 
-	function updateIt(what) {
+	const updateIt = (what) => {
 		const k = {};
 		k[what] = defaultConfig[what];
-		return browser.storage.local.set(k)
-			.then(() => console.log(`updated ${what}`));
-	}
+		promises.push(browser.storage.local.set(k)
+			.then(() => console.log(`updated ${what}`)));
+	};
 
 	for (const iter in defaultConfig) {
 		if (dbconf[iter] === undefined) {
@@ -337,23 +338,25 @@ async function checkStorage() {
 			}
 
 			// if formats fields change, update it
-			dbf.some((obj, i) => {
+			const needsUpdate = dbf.some((obj, i) => {
 				// TODO: improve DB representation of formats
 				const def = defFormats[i];
 				if (obj.name != def.name) {
-					updateIt(iter);
 					return true;
 				}
 				const s1 = Object.keys(obj).join();
 				const s2 = Object.keys(def).join();
 				if (s1 != s2) {
-					updateIt(iter);
 					return true;
 				}
 				return false;
-			})
+			});
+			if (needsUpdate) {
+				updateIt(iter);
+			}
 		}
 	}
+	await Promise.all(promises);
 }
 
 function arraysEqual(a, b) {
@@ -420,17 +423,18 @@ async function register() {
 	if (this.unreg != null) {
 		// content script is registered already, so remove it first don't worry
 		// about the icon though, if we fail something else will change it to off
-		removeScript(false);
+		await removeScript(false);
 	}
 	const [config, match] = await getConfigForRegister();
 
 	// anything to register?
 	if (config.functions.length === 0) {
-		removeScript();
-		return Promise.resolve(false);
+		await removeScript();
+		return false;
 	}
 
 	const code = `const EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};`;
+
 
 	// firefox >=59, not supported in chrome...
 	this.unreg = await browser.contentScripts.register({
@@ -443,17 +447,19 @@ async function register() {
 		allFrames: true
 	});
 
+	await browser.storage.local.set({ 'evalVillainActive': true });
 	browser.browserAction.setTitle({title: "EvalVillain: ON"});
 	browser.browserAction.setIcon({path: "/icons/on_48.png"});
 	debugLog("[EV_DEBUG] %cInjection Script registered", "color:#088;")
 	return true;
 }
 
-function removeScript(icon=true) {
+async function removeScript(icon=true) {
 	if (this.unreg) {
 		this.unreg.unregister();
 	}
 	this.unreg = null;
+	await browser.storage.local.set({ 'evalVillainActive': false });
 
 	if (icon) {
 		// turn of UI
@@ -462,12 +468,11 @@ function removeScript(icon=true) {
 	}
 }
 
-function toggleEV() {
+async function toggleEV() {
 	if (this.unreg) {
-		removeScript();
-		return new Promise(res => res());
+		await removeScript();
 	} else {
-		return register();
+		await register();
 	}
 }
 
@@ -514,17 +519,25 @@ function handleMessage(request, sender, _sendResponse) {
 }
 
 async function handleInstalled(details) {
-	this.debug = (details.temporary === true);
-	if (this.debug) {
-		debugLog("[EV DEBUG] installed with debugging");
-	}
+	this.debug = details.temporary;
+	debugLog("[EV DEBUG] installed with debugging");
 	await browser.storage.local.clear();
 	await checkStorage();
+	// Set to true on first install
+	await browser.storage.local.set({ 'evalVillainActive': true });
 	await register();
 }
 
 browser.runtime.onMessage.addListener(handleMessage);
 browser.runtime.onInstalled.addListener(handleInstalled);
+
+// Startup routine
+(async () => {
+	const result = await browser.storage.local.get('evalVillainActive');
+	if (result.evalVillainActive === true) {
+		await register();
+	}
+})();
 
 // Export for testing
 if (typeof module !== 'undefined' && module.exports) {

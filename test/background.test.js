@@ -15,7 +15,7 @@ global.browser = {
   },
   storage: {
     local: {
-      get: jest.fn(),
+      get: jest.fn().mockResolvedValue({ evalVillainActive: false }),
       set: jest.fn(),
     },
   },
