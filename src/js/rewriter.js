@@ -921,9 +921,9 @@ function getInterest(argObj, intrBundle) {
 		if (!CONFIG.advancedSinks) return;
 
 		if (CONFIG.advancedSinks.find(s => s.name === 'ShadowRoot.innerHTML')?.enabled) hookProp(ShadowRoot, 'innerHTML');
-		if (CONFIG.advancedSinks.find(s => s.name === 'Element.insertAdjacentHTML')?.enabled) hookMethod(Element.prototype, 'insertAdjacentHTML');
-		if (CONFIG.advancedSinks.find(s => s.name === 'Range.createContextualFragment')?.enabled) hookMethod(Range.prototype, 'createContextualFragment');
-		if (CONFIG.advancedSinks.find(s => s.name === 'Document.implementation.createHTMLDocument')?.enabled) hookMethod(Document.implementation, 'createHTMLDocument');
+		if (CONFIG.advancedSinks.find(s => s.name === 'Element.insertAdjacentHTML')?.enabled) hookMethod(Element, 'insertAdjacentHTML');
+		if (CONFIG.advancedSinks.find(s => s.name === 'Range.createContextualFragment')?.enabled) hookMethod(Range, 'createContextualFragment');
+		if (CONFIG.advancedSinks.find(s => s.name === 'Document.implementation.createHTMLDocument')?.enabled) hookMethod(DOMImplementation, 'createHTMLDocument', 'Document.implementation.createHTMLDocument');
 		if (CONFIG.advancedSinks.find(s => s.name === 'HTMLIFrameElement.srcdoc')?.enabled) hookProp(HTMLIFrameElement, 'srcdoc');
 		if (CONFIG.advancedSinks.find(s => s.name === 'Element.outerHTML')?.enabled) hookProp(Element, 'outerHTML');
 		if (CONFIG.advancedSinks.find(s => s.name === 'document.domain')?.enabled) hookProp(Document, 'domain');
