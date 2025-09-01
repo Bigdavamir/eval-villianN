@@ -322,14 +322,13 @@ async function checkStorage() {
 
 	for (const iter in defaultConfig) {
 		if (dbconf[iter] === undefined) {
-			updateIt(iter); // DNE, add it
+			updateIt(iter);
 		} else if (iter === "formats") {
 			const dbf = dbconf.formats;
 			if (!Array.isArray(dbf)) {
 				updateIt(iter);
 				continue;
 			}
-			// if defaultConfig has changed since install, we update
 			const defFormats = defaultConfig.formats;
 			const currentNames = dbf.map(x => x.name);
 			const defNames = defFormats.map(x => x.name);
@@ -337,9 +336,7 @@ async function checkStorage() {
 				updateIt(iter);
 			}
 
-			// if formats fields change, update it
 			const needsUpdate = dbf.some((obj, i) => {
-				// TODO: improve DB representation of formats
 				const def = defFormats[i];
 				if (obj.name != def.name) {
 					return true;
@@ -373,7 +370,6 @@ function arraysEqual(a, b) {
 
 async function getConfigForRegister() {
 	const dbconf = await getAllConfValidated();
-		// .then(worked);
 
 	const config = {};
 	config.formats = {};
@@ -383,7 +379,6 @@ async function getConfigForRegister() {
 		delete tmp.name;
 	}
 
-	// Pass these full config objects to the rewriter
 	config.globals = dbconf.globals;
 	config.powerFeatures = dbconf.powerFeatures;
 	config.advancedSinks = dbconf.advancedSinks;
@@ -394,7 +389,6 @@ async function getConfigForRegister() {
 			.map(x => x.pattern);
 	}
 
-	// target stuff {
 	const match = [];
 	const targRegex = /^(https?|wss?|file|ftp|\*):\/\/(\*|\*\.[^|)}>#]+|[^|)}>#]+)\/.*$/;
 	for (const i of dbconf.targets) {
@@ -407,7 +401,6 @@ async function getConfigForRegister() {
 		}
 	}
 
-	// no targets enabled means do all
 	if (match.length === 0) {
 		match.push("<all_urls>");
 	}
@@ -415,32 +408,21 @@ async function getConfigForRegister() {
 	return [config, match];
 }
 
-
-/**
-* Registers the content script with the current config
-**/
 async function register() {
 	if (this.unreg != null) {
-		// content script is registered already, so remove it first don't worry
-		// about the icon though, if we fail something else will change it to off
 		await removeScript(false);
 	}
 	const [config, match] = await getConfigForRegister();
 
-	// anything to register?
 	if (config.functions.length === 0) {
 		await removeScript();
 		return false;
 	}
 
-	const code = `const EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};`;
-
-
-	// firefox >=59, not supported in chrome...
 	this.unreg = await browser.contentScripts.register({
 		matches: match,
 		js: [
-			{ code: code },
+			{ code: `const EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};` },
 			{ file: "/js/switcheroo.js" }
 		],
 		runAt: "document_start",
@@ -462,7 +444,6 @@ async function removeScript(icon=true) {
 	await browser.storage.local.set({ 'evalVillainActive': false });
 
 	if (icon) {
-		// turn of UI
 		browser.browserAction.setTitle({title: "EvalVillain: OFF"});
 		browser.browserAction.setIcon({ path: "/icons/off_48.png"});
 	}
@@ -494,8 +475,6 @@ function handleMessage(request, sender, _sendResponse) {
 			}
 			return Promise.resolve(false);
 		case "getScriptInfo":
-			// The new switcheroo script only needs the config object.
-			// The matches are handled by the register function.
 			return getConfigForRegister().then(([config, _match]) => config);
 		case "csp-injection-failed":
 			if (sender.tab) {
@@ -509,37 +488,40 @@ function handleMessage(request, sender, _sendResponse) {
 					path: "/extra_icons/on_48_red.png"
 				});
 			}
-			return; // No response needed
+			return;
 		default:
 			const er = `Unknown message received: ${JSON.stringify(request)}`;
 			console.error(er);
-			// Optionally return a rejection to inform the sender
 			return Promise.reject(new Error(er));
 	}
 }
 
 async function handleInstalled(details) {
-	this.debug = details.temporary;
-	debugLog("[EV DEBUG] installed with debugging");
-	await browser.storage.local.clear();
-	await checkStorage();
-	// Set to true on first install
-	await browser.storage.local.set({ 'evalVillainActive': true });
-	await register();
+	this.debug = (details.temporary === true);
+	if (details.reason === "install") {
+		debugLog("[EV DEBUG] First install");
+		await browser.storage.local.clear();
+		await checkStorage();
+		await browser.storage.local.set({ 'evalVillainActive': true });
+		await register();
+	} else if (details.reason === "update") {
+		debugLog("[EV DEBUG] Extension updated");
+		await checkStorage();
+	}
 }
-
-browser.runtime.onMessage.addListener(handleMessage);
-browser.runtime.onInstalled.addListener(handleInstalled);
 
 // Startup routine
 (async () => {
+	await checkStorage();
 	const result = await browser.storage.local.get('evalVillainActive');
 	if (result.evalVillainActive === true) {
 		await register();
 	}
 })();
 
-// Export for testing
+browser.runtime.onMessage.addListener(handleMessage);
+browser.runtime.onInstalled.addListener(handleInstalled);
+
 if (typeof module !== 'undefined' && module.exports) {
 	module.exports = { arraysEqual, defaultConfig };
 }
