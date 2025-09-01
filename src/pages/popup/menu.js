@@ -1,23 +1,8 @@
-var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures", "advancedsinks"];
-
-// --- Start of bkg_api.js content ---
-function amIOn() {
-    return browser.runtime.sendMessage({type: "on?"});
-}
-
-function toggleBackground() {
-    return browser.runtime.sendMessage({type: "toggle"});
-}
-
-function updateBackground() {
-    return browser.runtime.sendMessage({type: "updated"});
-}
-// --- End of bkg_api.js content ---
-
+var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures", "advancedSinks"];
 
 function updateToggle(on) {
 	if (typeof(on) !== "boolean") {
-		console.error("unexpected message type in updateToggle");
+		console.error("unexpected message type");
 		return;
 	}
 	let d = document.getElementById("toggle");
@@ -28,18 +13,8 @@ function updateToggle(on) {
 }
 
 async function update_if_on() {
-	try {
-        const on = await amIOn();
-	    updateToggle(on);
-    } catch (e) {
-        console.error("Failed to check extension status:", e);
-        updateToggle(false);
-        const main = document.getElementById("main-content");
-        const status = document.getElementById("status-message");
-        main.classList.add("hidden");
-        status.innerText = "Error! Could not connect to background script.";
-        status.classList.remove("hidden");
-    }
+	const on = await amIOn();
+	updateToggle(on);
 }
 
 function createCheckBox(name, checked, subMenu) {
@@ -72,24 +47,21 @@ function createCheckBox(name, checked, subMenu) {
 }
 
 async function getSections() {
-	const keys = ["targets", "needles", "blacklist", "functions", "types", "formats", "powerfeatures", "advancedsinks"];
-	const all = await browser.storage.local.get(keys);
+	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats", "powerFeatures", "advancedSinks"]);
 	const autoOpen = [];
 	const onOff = [];
-	if (all.formats && Array.isArray(all.formats)) {
-        for (let k of all.formats) {
-            autoOpen.push({
-                name: k.pretty,
-                pattern: k.name,
-                enabled: k.open,
-            });
-            onOff.push({
-                name: k.pretty,
-                pattern: k.name,
-                enabled: k.use,
-            });
-        }
-    }
+	for (let k of all.formats) {
+		autoOpen.push({
+			name: k.pretty,
+			pattern: k.name,
+			enabled: k.open,
+		});
+		onOff.push({
+			name: k.pretty,
+			pattern: k.name,
+			enabled: k.use,
+		});
+	}
 	all.autoOpen = autoOpen;
 	all.onOff = onOff;
 	delete all.formats;
@@ -100,20 +72,16 @@ async function populateSubMenus() {
 	const res = await getSections();
 	for (let sub of configList) {
 		if (!res[sub]) {
-			console.error("Could not get: " + sub + " from storage.");
+			console.error("Could not get: " + sub);
 			continue;
 		}
 
 		var where = document.getElementById(`${sub}-sub`);
-		// This was the site of the crash. If `where` is null, something is wrong.
-		if (!where) {
-			console.error(`Could not find element with ID: ${sub}-sub`);
-			continue;
-		}
 		for (let itr of res[sub]) {
 			if (typeof(itr.enabled) === 'boolean') {
 				const displayName = itr.pretty || itr.name;
 				const inpt = createCheckBox(displayName, itr.enabled, sub);
+				// The ID for the checkbox needs to be the internal name for saving, not the pretty name
 				if (itr.pretty) {
 					inpt.querySelector('input').id = itr.name;
 				}
@@ -190,14 +158,12 @@ function listener(ev) {
 		return
 	}
 
-	if (id.startsWith("h1-")) {
-		const sub = id.substring(3);
-		const element = document.getElementById(sub);
-		if (element) {
-			element.classList.toggle('closed');
-			element.classList.toggle('open');
-		}
-		return;
+	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types", "h1-powerfeatures", "h1-advancedsinks", "h1-timeline"].includes(id)) {
+		let sub = id.substr(3);
+		let formats = document.getElementById(sub);
+		formats.classList.toggle('closed');
+		formats.classList.toggle('open');
+		return
 	}
 	if (id == "h1-config" ) {
 		goToConfig();
@@ -216,43 +182,6 @@ function goToConfig() {
 		return;
 }
 
-function showContent() {
-    document.getElementById("status-message").classList.add("hidden");
-    document.getElementById("main-content").classList.remove("hidden");
-}
-
-function showLoading() {
-    document.getElementById("main-content").classList.add("hidden");
-    document.getElementById("status-message").innerText = "Initializing...";
-    document.getElementById("status-message").classList.remove("hidden");
-}
-
-async function main() {
-    showLoading();
-    document.addEventListener("click", listener);
-
-    const readyPopup = async () => {
-        await update_if_on();
-        await populateSubMenus();
-        showContent();
-    };
-
-    try {
-        const isReady = await browser.runtime.sendMessage({type: "getInitStatus"});
-        if (isReady) {
-            await readyPopup();
-        } else {
-            browser.runtime.onMessage.addListener(async (message) => {
-                if (message.type === "backgroundReady") {
-                    await readyPopup();
-                }
-            });
-        }
-    } catch (e) {
-        console.error("Error communicating with background script:", e);
-        const status = document.getElementById("status-message");
-        status.innerText = "Error: Could not connect to extension background. Please try reloading the extension.";
-    }
-}
-
-main();
+update_if_on();
+document.addEventListener("click", listener);
+populateSubMenus();

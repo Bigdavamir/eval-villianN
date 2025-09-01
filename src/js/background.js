@@ -124,8 +124,29 @@ async function checkStorage() {
 	return Promise.all(promises);
 }
 
+async function getFullConfig() {
+    return browser.storage.local.get(Object.keys(defaultConfig));
+}
+
+async function broadcastConfig() {
+    const config = await getFullConfig();
+    const tabs = await browser.tabs.query({});
+    for (const tab of tabs) {
+      try {
+        await browser.tabs.sendMessage(tab.id, {
+          type: "configUpdate",
+          config: config
+        });
+      } catch (e) {
+        // This can happen if the content script is not injected in the tab
+        debugLog(`Could not send config to tab ${tab.id}`);
+      }
+    }
+    debugLog("Broadcasted config to all tabs.");
+}
+
 async function getConfigForRegister() {
-	const dbconf = await browser.storage.local.get(Object.keys(defaultConfig));
+	const dbconf = await getFullConfig();
 	const config = {};
 	config.formats = {};
 	for (const i of dbconf.formats) {
@@ -136,7 +157,6 @@ async function getConfigForRegister() {
 	config.globals = dbconf.globals;
 	config.powerfeatures = dbconf.powerfeatures;
 
-	// Unify functions and advancedsinks for hooking
 	const functionsToHook = [...dbconf.functions, ...dbconf.advancedsinks];
 	config.functions = functionsToHook
 		.filter(x => x.enabled)
@@ -208,6 +228,7 @@ async function toggleEV() {
 		await register();
 		await browser.storage.local.set({ 'evalVillainActive': true });
 	}
+    await broadcastConfig();
 }
 
 function handleMessage(request, sender, sendResponse) {
@@ -222,10 +243,8 @@ function handleMessage(request, sender, sendResponse) {
 		case "toggle":
 			return toggleEV();
 		case "updated":
-			if (unreg) {
-				return register();
-			}
-			return Promise.resolve(false);
+            Promise.all([register(), broadcastConfig()]);
+			return Promise.resolve(true);
 		case "getScriptInfo":
 			return getConfigForRegister().then(([config, _match]) => config);
 		case "csp-injection-failed":
@@ -268,8 +287,8 @@ browser.runtime.onInstalled.addListener(async (details) => {
 		debugLog("First-time install detected.");
 		await browser.storage.local.clear();
 		await browser.storage.local.set({ 'evalVillainActive': true });
-		await initialize();
 	}
+    await initialize();
 });
 
 (async () => {

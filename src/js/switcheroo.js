@@ -19,9 +19,7 @@
         const injectionPayload = `
             try {
                 document.documentElement.setAttribute('${checkId}', '1');
-                if (typeof window.EVAL_VILLAIN_CONFIG === 'undefined') {
-                    window.EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};
-                }
+                window.EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};
                 ${rewriterSource}
             } catch (e) {
                 console.error("Eval Villain injection error:", e);
@@ -59,9 +57,11 @@
      */
     async function main() {
         try {
-            // The config is now passed directly by the background script as a local const.
-            // We still need to fetch the rewriter script text.
-            const rewriterResponse = await fetch(browser.runtime.getURL('/js/rewriter.js'));
+            // Concurrently fetch the config from the background and the rewriter script text.
+            const [config, rewriterResponse] = await Promise.all([
+                browser.runtime.sendMessage("getScriptInfo"),
+                fetch(browser.runtime.getURL('/js/rewriter.js'))
+            ]);
 
             if (!rewriterResponse.ok) {
                 throw new Error(`Failed to fetch rewriter.js: ${rewriterResponse.statusText}`);
@@ -70,8 +70,7 @@
             const rewriterSource = await rewriterResponse.text();
 
             // Now that we have both, inject the script.
-            // The `EVAL_VILLAIN_CONFIG` constant is available in this scope.
-            inject_it(rewriterSource, EVAL_VILLAIN_CONFIG);
+            inject_it(rewriterSource, config);
         } catch (error) {
             console.error("Eval Villain bootstrap failed:", error);
         }
