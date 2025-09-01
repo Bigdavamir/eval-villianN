@@ -3,7 +3,7 @@
 	"name" : "Eval Villain",
 	"version" : "2.11",
 	"description" : "Hook interesting functions to see their input.",
-	"permissions": ["<all_urls>", "storage", "webNavigation"],
+	"permissions": ["<all_urls>", "storage"],
 	"icons" : {
 		"48" : "icons/on_48.png",
 		"96" : "icons/on_96.png"
@@ -30,9 +30,5 @@
 		"toggle": {
 			"description": "Toggle Eval Villain"
 		}
-	},
-
-	"web_accessible_resources": [
-		"/js/rewriter.js"
-	]
+	}
 }

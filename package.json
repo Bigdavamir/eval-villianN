@@ -1,0 +1,27 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bigdavamir/eval-villianN.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Bigdavamir/eval-villianN/issues"
+  },
+  "homepage": "https://github.com/Bigdavamir/eval-villianN#readme",
+  "devDependencies": {
+    "jest": "^30.1.1"
+  }
+}

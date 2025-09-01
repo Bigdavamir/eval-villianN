@@ -146,6 +146,19 @@ const defaultConfig = {
 			"enabled": false
 		}
 	],
+	"advancedSinks": [
+		{ "name": "shadowRoot", "pretty": "ShadowRoot.innerHTML", "enabled": true },
+		{ "name": "insertAdjacentHTML", "pretty": "Element.insertAdjacentHTML", "enabled": true },
+		{ "name": "rangeCreateContextualFragment", "pretty": "Range.createContextualFragment", "enabled": true },
+		{ "name": "domParser", "pretty": "DOMParser.parseFromString", "enabled": true },
+		{ "name": "createHTMLDocument", "pretty": "Document.implementation.createHTMLDocument", "enabled": true },
+		{ "name": "iframeSrcdoc", "pretty": "HTMLIFrameElement.srcdoc", "enabled": true },
+		{ "name": "elementOuterHTML", "pretty": "Element.outerHTML", "enabled": true },
+		{ "name": "documentDomain", "pretty": "document.domain", "enabled": true },
+		{ "name": "dangerousProtocols", "pretty": "javascript:/data: URLs", "enabled": true },
+		{ "name": "styleInnerHTML", "pretty": "HTMLStyleElement.innerHTML", "enabled": true },
+		{ "name": "cssText", "pretty": "CSSStyleSheet.cssText", "enabled": true }
+	],
 	"formats": [
 		{
 			"name"		: "title",
@@ -362,7 +375,9 @@ async function getConfigForRegister() {
 		}
 	}
 
+	// Pass these full config objects to the rewriter
 	config.powerFeatures = dbconf.powerFeatures;
+	config.advancedSinks = dbconf.advancedSinks;
 
 	for (const what of ["needles", "blacklist", "functions", "types"]) {
 		config[what] = config[what] = dbconf[what]
@@ -410,14 +425,16 @@ async function register() {
 		return;
 	}
 
-	const code = `window.EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};`;
+	const code = `config = ${JSON.stringify(config)};`;
+
 
 	// firefox >=59, not supported in chrome...
 	this.unreg = await browser.contentScripts.register({
 		matches: match,
 		js: [
-			{ code: code },                // sets the config on the window
-			{ file: "/js/injector.js" }    // creates a script tag to inject rewriter.js
+			{code: code}, 					// contains configuration for rewriter
+			{file: "/js/rewriter.js"},		// Has actual code that gets injected into the page
+			{file: "/js/switcheroo.js"}		// cause the injection
 		],
 		runAt: "document_start",
 		allFrames: true
@@ -483,45 +500,10 @@ function handleInstalled(details) {
 	}
 }
 
-const EV_PERSISTENT_SOURCES_KEY = 'evalvillain_persistent_sources';
-
-browser.webNavigation.onBeforeNavigate.addListener((details) => {
-	// We are only interested in top-level frames, not iframes etc.
-	if (details.frameId !== 0) {
-		return;
-	}
-
-	browser.storage.local.get(EV_PERSISTENT_SOURCES_KEY, (result) => {
-		const persisted = result[EV_PERSISTENT_SOURCES_KEY] || [];
-		if (persisted.length === 0) {
-			return;
-		}
-
-		for (const source of persisted) {
-			// Check if the navigating URL contains a persisted source string.
-			if (details.url.includes(source)) {
-				console.log(
-					`%c[EV] Navigation Match Found!%c\n  - URL: %c${details.url}%c\n  - Matched Source: %c${source}`,
-					"color: red; font-weight: bold;",
-					"color: inherit;",
-					"color: #088; font-weight: bold;",
-					"color: inherit;",
-					"color: #088; font-weight: bold;"
-				);
-				// Break after the first match to avoid spamming the console for the same URL.
-				break;
-			}
-		}
-	});
-}, { url: [{ schemes: ["http", "https"] }] });
-
-browser.webNavigation.onCommitted.addListener((details) => {
-	if (details.frameId !== 0) {
-		return;
-	}
-	// This is for testing and analysis as requested.
-	console.log(`[EV] Navigation Committed: URL=${details.url}, Type=${details.transitionType}`);
-});
-
 browser.runtime.onMessage.addListener(handleMessage);
 browser.runtime.onInstalled.addListener(handleInstalled);
+
+// Export for testing
+if (typeof module !== 'undefined' && module.exports) {
+	module.exports = { arraysEqual, defaultConfig };
+}

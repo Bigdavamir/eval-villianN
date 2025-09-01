@@ -122,3 +122,24 @@ input:checked + .slider:before {
   -ms-transform: translateX(26px);
   transform: translateX(26px);
 }
+
+.button-link {
+    background: none;
+    border: 1px solid #859900;
+    color: #859900;
+    padding: 8px 12px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 1em;
+    margin: 4px 2px;
+    cursor: pointer;
+    border-radius: 4px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.button-link:hover {
+    background-color: #859900;
+    color: #111;
+}
