@@ -380,14 +380,8 @@ async function getConfigForRegister() {
 		delete tmp.name;
 	}
 
-	// globals
-	for (const i of dbconf.globals) {
-		if (i.enabled) {
-			config[i.name] = i.pattern;
-		}
-	}
-
 	// Pass these full config objects to the rewriter
+	config.globals = dbconf.globals;
 	config.powerFeatures = dbconf.powerFeatures;
 	config.advancedSinks = dbconf.advancedSinks;
 
