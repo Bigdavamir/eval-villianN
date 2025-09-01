@@ -430,20 +430,13 @@ async function register() {
 		return Promise.resolve(false);
 	}
 
-	const code = `
-		const script = document.createElement('script');
-		script.textContent = \`window.EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};\`;
-		(document.head || document.documentElement).appendChild(script);
-		script.remove();
-	`;
-
+	const code = `const EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};`;
 
 	// firefox >=59, not supported in chrome...
 	this.unreg = await browser.contentScripts.register({
 		matches: match,
 		js: [
 			{ code: code },
-			{ file: "/js/rewriter.js" },
 			{ file: "/js/switcheroo.js" }
 		],
 		runAt: "document_start",
