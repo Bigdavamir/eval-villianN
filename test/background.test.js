@@ -12,26 +12,37 @@ global.browser = {
     onInstalled: {
       addListener: jest.fn(),
     },
+    onStartup: {
+        addListener: jest.fn(),
+    },
+    getURL: jest.fn(path => `moz-extension://<uuid>${path}`),
   },
   storage: {
     local: {
-      get: jest.fn().mockResolvedValue({ evalVillainActive: false }),
+      get: jest.fn().mockResolvedValue({}),
       set: jest.fn().mockResolvedValue(),
+      clear: jest.fn().mockResolvedValue(),
     },
   },
-  webNavigation: {
-    onBeforeNavigate: {
-      addListener: jest.fn(),
-    },
-    onCommitted: {
-        addListener: jest.fn()
-    }
+  contentScripts: {
+      register: jest.fn().mockResolvedValue({
+          unregister: jest.fn(),
+      }),
   },
+  browserAction: {
+      setTitle: jest.fn(),
+      setIcon: jest.fn(),
+  }
 };
 
 const { arraysEqual } = require('../src/js/background.js');
 
 describe('arraysEqual', () => {
+    beforeEach(() => {
+        // Clear mock history before each test
+        jest.clearAllMocks();
+    });
+
   test('should return true for equal arrays', () => {
     const arr1 = [1, 2, 3];
     const arr2 = [1, 2, 3];

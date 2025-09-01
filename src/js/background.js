@@ -280,44 +280,34 @@ const defaultConfig = {
 			"highlight" : "N/A"
 		}
 	]
+};
+
+let unreg = null;
+let debug = false;
+
+function debugLog(...args) {
+	if (!debug) return;
+	console.log(...args);
 }
 
-function getAllConf() {
-	return browser.storage.local.get(Object.keys(defaultConfig)).catch(console.error);
-}
-
-async function getAllConfValidated() {
-	let dbconf = await getAllConf();
-	for (let i = 0; i < 2; i++) { // retry loop
-		let success = true;
-		for (const i of Object.keys(defaultConfig)) {
-			if (dbconf[i] === undefined || !Array.isArray(dbconf[i])) {
-				await checkStorage();
-				dbconf = await getAllConf();
-				success = false;
-			}
-		}
-		if (success) {
-			return dbconf;
-		}
+function arraysEqual(a, b) {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) return false;
 	}
-	return null;
-}
-
-function debugLog() {
-	if (!this.debug) return;
-	console.log(...arguments);
+	return true;
 }
 
 async function checkStorage() {
-	const dbconf = await getAllConf();
+	const dbconf = await browser.storage.local.get(Object.keys(defaultConfig));
 	const promises = [];
 
 	const updateIt = (what) => {
 		const k = {};
 		k[what] = defaultConfig[what];
-		promises.push(browser.storage.local.set(k)
-			.then(() => console.log(`updated ${what}`)));
+		promises.push(
+			browser.storage.local.set(k).then(() => debugLog(`updated ${what}`))
+		);
 	};
 
 	for (const iter in defaultConfig) {
@@ -334,43 +324,25 @@ async function checkStorage() {
 			const defNames = defFormats.map(x => x.name);
 			if (!arraysEqual(currentNames, defNames)) {
 				updateIt(iter);
+				continue;
 			}
-
 			const needsUpdate = dbf.some((obj, i) => {
 				const def = defFormats[i];
-				if (obj.name != def.name) {
-					return true;
-				}
+				if (obj.name !== def.name) return true;
 				const s1 = Object.keys(obj).join();
 				const s2 = Object.keys(def).join();
-				if (s1 != s2) {
-					return true;
-				}
-				return false;
+				return s1 !== s2;
 			});
 			if (needsUpdate) {
 				updateIt(iter);
 			}
 		}
 	}
-	await Promise.all(promises);
-}
-
-function arraysEqual(a, b) {
-	if (a.length !== b.length) {
-		return false;
-	}
-	for (let i = 0; i < a.length; i++) {
-		if (a[i] !== b[i]) {
-			return false;
-		}
-	}
-	return true;
+	return Promise.all(promises);
 }
 
 async function getConfigForRegister() {
-	const dbconf = await getAllConfValidated();
-
+	const dbconf = await browser.storage.local.get(Object.keys(defaultConfig));
 	const config = {};
 	config.formats = {};
 	for (const i of dbconf.formats) {
@@ -378,17 +350,14 @@ async function getConfigForRegister() {
 		config.formats[tmp.name] = tmp;
 		delete tmp.name;
 	}
-
 	config.globals = dbconf.globals;
 	config.powerFeatures = dbconf.powerFeatures;
 	config.advancedSinks = dbconf.advancedSinks;
-
 	for (const what of ["needles", "blacklist", "functions", "types"]) {
-		config[what] = config[what] = dbconf[what]
+		config[what] = dbconf[what]
 			.filter(x => x.enabled)
 			.map(x => x.pattern);
 	}
-
 	const match = [];
 	const targRegex = /^(https?|wss?|file|ftp|\*):\/\/(\*|\*\.[^|)}>#]+|[^|)}>#]+)\/.*$/;
 	for (const i of dbconf.targets) {
@@ -396,30 +365,26 @@ async function getConfigForRegister() {
 			if (targRegex.test(i.pattern)) {
 				match.push(i.pattern);
 			} else {
-				throw `Error on Target ${i.name}: ${i.pattern} must match: ${targRegex}`;
+				console.error(`Error on Target ${i.name}: ${i.pattern} must match: ${targRegex}`);
 			}
 		}
 	}
-
 	if (match.length === 0) {
 		match.push("<all_urls>");
 	}
-	debugLog("[EV DEBUG] matches: %s", match);
 	return [config, match];
 }
 
 async function register() {
-	if (this.unreg != null) {
+	if (unreg != null) {
 		await removeScript(false);
 	}
 	const [config, match] = await getConfigForRegister();
-
 	if (config.functions.length === 0) {
 		await removeScript();
 		return false;
 	}
-
-	this.unreg = await browser.contentScripts.register({
+	unreg = await browser.contentScripts.register({
 		matches: match,
 		js: [
 			{ code: `const EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};` },
@@ -428,21 +393,17 @@ async function register() {
 		runAt: "document_start",
 		allFrames: true
 	});
-
-	await browser.storage.local.set({ 'evalVillainActive': true });
 	browser.browserAction.setTitle({title: "EvalVillain: ON"});
 	browser.browserAction.setIcon({path: "/icons/on_48.png"});
-	debugLog("[EV_DEBUG] %cInjection Script registered", "color:#088;")
+	debugLog("[EV_DEBUG] %cInjection Script registered", "color:#088;");
 	return true;
 }
 
 async function removeScript(icon=true) {
-	if (this.unreg) {
-		this.unreg.unregister();
+	if (unreg) {
+		unreg.unregister();
 	}
-	this.unreg = null;
-	await browser.storage.local.set({ 'evalVillainActive': false });
-
+	unreg = null;
 	if (icon) {
 		browser.browserAction.setTitle({title: "EvalVillain: OFF"});
 		browser.browserAction.setIcon({ path: "/icons/off_48.png"});
@@ -450,27 +411,25 @@ async function removeScript(icon=true) {
 }
 
 async function toggleEV() {
-	if (this.unreg) {
+	const isActive = !!unreg;
+	if (isActive) {
 		await removeScript();
+		await browser.storage.local.set({ 'evalVillainActive': false });
 	} else {
 		await register();
+		await browser.storage.local.set({ 'evalVillainActive': true });
 	}
 }
 
-browser.commands.onCommand.addListener(function(command) {
-	if (command == "toggle") toggleEV();
-});
-
 function handleMessage(request, sender, _sendResponse) {
 	const requestStr = typeof request === 'string' ? request : request.type;
-
 	switch (requestStr) {
 		case "on?":
-			return Promise.resolve(!!this.unreg);
+			return Promise.resolve(!!unreg);
 		case "toggle":
 			return toggleEV();
 		case "updated":
-			if (this.unreg) {
+			if (unreg) {
 				return register();
 			}
 			return Promise.resolve(false);
@@ -490,37 +449,53 @@ function handleMessage(request, sender, _sendResponse) {
 			}
 			return;
 		default:
-			const er = `Unknown message received: ${JSON.stringify(request)}`;
-			console.error(er);
-			return Promise.reject(new Error(er));
+			console.error(`Unknown message received: ${JSON.stringify(request)}`);
+			return Promise.reject(new Error(`Unknown message: ${requestStr}`));
 	}
 }
 
-async function handleInstalled(details) {
-	this.debug = (details.temporary === true);
-	if (details.reason === "install") {
-		debugLog("[EV DEBUG] First install");
-		await browser.storage.local.clear();
-		await checkStorage();
-		await browser.storage.local.set({ 'evalVillainActive': true });
-		await register();
-	} else if (details.reason === "update") {
-		debugLog("[EV DEBUG] Extension updated");
-		await checkStorage();
-	}
+async function initialize(isInstall) {
+    if (isInstall) {
+        debugLog("[EV DEBUG] First install");
+        await browser.storage.local.clear();
+        await checkStorage();
+        await browser.storage.local.set({ 'evalVillainActive': true });
+    } else {
+        await checkStorage();
+    }
+
+    const result = await browser.storage.local.get('evalVillainActive');
+    if (result.evalVillainActive) {
+        await register();
+    }
 }
 
-// Startup routine
+browser.runtime.onInstalled.addListener(details => {
+    debug = details.temporary || false;
+    if (details.reason === "install") {
+        initialize(true);
+    } else if (details.reason === "update") {
+        initialize(false);
+    }
+});
+
 (async () => {
-	await checkStorage();
-	const result = await browser.storage.local.get('evalVillainActive');
-	if (result.evalVillainActive === true) {
-		await register();
-	}
+    // This runs on every browser startup and extension reload
+    const result = await browser.storage.local.get('evalVillainActive');
+    if (result.evalVillainActive === undefined) {
+        // If the flag is not set, it's likely a startup after the extension was added
+        // without going through the install flow (e.g. from source).
+        // We'll treat it as an install.
+        await initialize(true);
+    } else if (result.evalVillainActive) {
+        await initialize(false);
+    }
 })();
 
 browser.runtime.onMessage.addListener(handleMessage);
-browser.runtime.onInstalled.addListener(handleInstalled);
+browser.commands.onCommand.addListener(command => {
+	if (command == "toggle") toggleEV();
+});
 
 if (typeof module !== 'undefined' && module.exports) {
 	module.exports = { arraysEqual, defaultConfig };
