@@ -1,4 +1,4 @@
-// default config stuff
+// default config stuff v2
 const defaultConfig = {
 	"functions" : [
 		{
@@ -516,10 +516,11 @@ function handleMessage(request, sender, _sendResponse) {
 	}
 }
 
-function handleInstalled(details) {
+async function handleInstalled(details) {
 	this.debug = details.temporary;
 	debugLog("[EV DEBUG] installed with debugging");
-	checkStorage();
+	await browser.storage.local.clear();
+	await checkStorage();
 	if (this.debug) {
 		register();
 	}
