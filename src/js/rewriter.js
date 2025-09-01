@@ -1,4 +1,4 @@
-// This script is injected into the page context.....6
+// This script is injected into the page context.....7
 (function() {
 	'use strict';
 
