@@ -3,10 +3,19 @@
 	'use strict';
 
 	// CONFIG is set by the injector script on the window object.
-	const CONFIG = window.EVAL_VILLAIN_CONFIG;
+	let CONFIG = window.EVAL_VILLAIN_CONFIG;
 	if (!CONFIG) {
-		console.error("[EV] Config not found. Aborting injection.");
-		return;
+		console.warn("[EV] Config not found. Using minimal default.");
+		CONFIG = {
+			functions: [],
+			blacklist: [],
+			needles: [],
+			types: [],
+			globals: [],
+			powerFeatures: [],
+			advancedSinks: [],
+			formats: {}
+		};
 	}
 
 	const EV = {};

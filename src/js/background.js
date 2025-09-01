@@ -427,20 +427,24 @@ async function register() {
 	// anything to register?
 	if (config.functions.length === 0) {
 		removeScript();
-		res(false);
-		return;
+		return Promise.resolve(false);
 	}
 
-	const code = `config = ${JSON.stringify(config)};`;
+	const code = `
+		const script = document.createElement('script');
+		script.textContent = \`window.EVAL_VILLAIN_CONFIG = ${JSON.stringify(config)};\`;
+		(document.head || document.documentElement).appendChild(script);
+		script.remove();
+	`;
 
 
 	// firefox >=59, not supported in chrome...
 	this.unreg = await browser.contentScripts.register({
 		matches: match,
 		js: [
-			{code: code}, 					// contains configuration for rewriter
-			{file: "/js/rewriter.js"},		// Has actual code that gets injected into the page
-			{file: "/js/switcheroo.js"}		// cause the injection
+			{ code: code },
+			{ file: "/js/rewriter.js" },
+			{ file: "/js/switcheroo.js" }
 		],
 		runAt: "document_start",
 		allFrames: true
@@ -517,13 +521,13 @@ function handleMessage(request, sender, _sendResponse) {
 }
 
 async function handleInstalled(details) {
-	this.debug = details.temporary;
-	debugLog("[EV DEBUG] installed with debugging");
+	this.debug = (details.temporary === true);
+	if (this.debug) {
+		debugLog("[EV DEBUG] installed with debugging");
+	}
 	await browser.storage.local.clear();
 	await checkStorage();
-	if (this.debug) {
-		register();
-	}
+	await register();
 }
 
 browser.runtime.onMessage.addListener(handleMessage);
