@@ -1,4 +1,5 @@
-var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures"];
+var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures", "advancedSinks"];
+
 function updateToggle(on) {
 	if (typeof(on) !== "boolean") {
 		console.error("unexpected message type");
@@ -21,11 +22,9 @@ function createCheckBox(name, checked, subMenu) {
 	var li = d.createElement("li");
 	li.className = "toggle";
 
-	// first child of li
 	var label = d.createElement("label");
 	label.className = "switch";
 
-	// first child of label
 	var input = d.createElement("input");
 	input.type = "checkbox";
 	input.name = subMenu;
@@ -34,13 +33,11 @@ function createCheckBox(name, checked, subMenu) {
 	input.id = name;
 	label.appendChild(input);
 
-	// second child of label
 	let div = d.createElement("div");
 	div.className = "slider";
 	label.appendChild(div);
 	li.appendChild(label);
 
-	// second child of li
 	var span = d.createElement("span");
 	span.className = "label";
 	span.innerText = name;
@@ -50,7 +47,7 @@ function createCheckBox(name, checked, subMenu) {
 }
 
 async function getSections() {
-	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats", "powerFeatures"]);
+	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats", "powerFeatures", "advancedSinks"]);
 	const autoOpen = [];
 	const onOff = [];
 	for (let k of all.formats) {
@@ -76,6 +73,7 @@ async function populateSubMenus() {
 	for (let sub of configList) {
 		if (!res[sub]) {
 			console.error("Could not get: " + sub);
+			continue;
 		}
 
 		var where = document.getElementById(`${sub}-sub`);
@@ -147,20 +145,20 @@ function listener(ev) {
 	let name = ev.target.name;
 
 	if (node === "INPUT") {
-		if (id === "toggle") {															// on off button
+		if (id === "toggle") {
 			toggleBackground()
 				.then(update_if_on)
 				.catch(err => {
 					console.error(`toggle error: ${err}`);
 					updateToggle(false);
 				});
-		} else if (configList.includes(name)) {						// submenu checkbox?
+		} else if (configList.includes(name)) {
 			updateSubmenu(ev.target);
 		}
 		return
 	}
 
-	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types", "h1-powerfeatures"].includes(id)) {
+	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types", "h1-powerfeatures", "h1-advancedsinks", "h1-timeline"].includes(id)) {
 		let sub = id.substr(3);
 		let formats = document.getElementById(sub);
 		formats.classList.toggle('closed');
@@ -171,6 +169,10 @@ function listener(ev) {
 		goToConfig();
 		return;
 	}
+	if (id == "view-timeline-btn") {
+        browser.tabs.create({ url: '../timeline/timeline.html' });
+        return;
+    }
 }
 
 function goToConfig() {
