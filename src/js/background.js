@@ -156,9 +156,9 @@ async function getConfigForRegister() {
 	}
 	config.globals = dbconf.globals;
 	config.powerfeatures = dbconf.powerfeatures;
+	config.advancedsinks = dbconf.advancedsinks;
 
-	const functionsToHook = [...dbconf.functions, ...dbconf.advancedsinks];
-	config.functions = functionsToHook
+	config.functions = dbconf.functions
 		.filter(x => x.enabled)
 		.map(x => x.pattern);
 
