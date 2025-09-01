@@ -42,11 +42,11 @@ const defaultConfig = {
 		{ "name" : "sinker", "enabled" : false, "pattern" : "evSinker" },
 		{ "name" : "sourcer", "enabled" : false, "pattern" : "evSourcer" }
 	],
-	"powerfeatures": [
+	"powerFeatures": [
 		{ "name": "autoSourceFetch", "pretty": "Auto-Source Fetch/XHR Responses", "enabled": false },
 		{ "name": "autoSourcePostMessage", "pretty": "Auto-Source postMessage Data", "enabled": false }
 	],
-	"advancedsinks": [
+	"advancedSinks": [
 		{ "name": "ShadowRoot.innerHTML", "enabled": true, "pattern": "set(ShadowRoot.innerHTML)" },
 		{ "name": "Element.insertAdjacentHTML", "enabled": true, "pattern": "Element.prototype.insertAdjacentHTML" },
 		{ "name": "Range.createContextualFragment", "enabled": true, "pattern": "Range.prototype.createContextualFragment" },
@@ -155,8 +155,8 @@ async function getConfigForRegister() {
 		delete tmp.name;
 	}
 	config.globals = dbconf.globals;
-	config.powerfeatures = dbconf.powerfeatures;
-	config.advancedsinks = dbconf.advancedsinks;
+	config.powerFeatures = dbconf.powerFeatures;
+	config.advancedSinks = dbconf.advancedSinks;
 
 	config.functions = dbconf.functions
 		.filter(x => x.enabled)

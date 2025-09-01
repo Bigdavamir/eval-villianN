@@ -1,4 +1,4 @@
-var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures", "advancedSinks"];
+var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerFeatures", "advancedSinks"];
 
 function updateToggle(on) {
 	if (typeof(on) !== "boolean") {
@@ -158,7 +158,7 @@ function listener(ev) {
 		return
 	}
 
-	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types", "h1-powerfeatures", "h1-advancedsinks", "h1-timeline"].includes(id)) {
+	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types", "h1-powerFeatures", "h1-advancedSinks", "h1-timeline"].includes(id)) {
 		let sub = id.substr(3);
 		let formats = document.getElementById(sub);
 		formats.classList.toggle('closed');

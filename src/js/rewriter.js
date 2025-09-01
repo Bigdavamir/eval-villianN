@@ -918,26 +918,26 @@ function getInterest(argObj, intrBundle) {
 			} catch (e) { real.warn(`[EV] Failed to hook ${proto.name}.prototype.${prop}:`, e); }
 		};
 
-		if (!CONFIG.advancedsinks) return;
+		if (!CONFIG.advancedSinks) return;
 
-		if (CONFIG.advancedsinks.find(s => s.name === 'ShadowRoot.innerHTML')?.enabled) hookProp(ShadowRoot, 'innerHTML');
-		if (CONFIG.advancedsinks.find(s => s.name === 'Element.insertAdjacentHTML')?.enabled) hookMethod(Element.prototype, 'insertAdjacentHTML');
-		if (CONFIG.advancedsinks.find(s => s.name === 'Range.createContextualFragment')?.enabled) hookMethod(Range.prototype, 'createContextualFragment');
-		if (CONFIG.advancedsinks.find(s => s.name === 'Document.implementation.createHTMLDocument')?.enabled) hookMethod(Document.implementation, 'createHTMLDocument');
-		if (CONFIG.advancedsinks.find(s => s.name === 'HTMLIFrameElement.srcdoc')?.enabled) hookProp(HTMLIFrameElement, 'srcdoc');
-		if (CONFIG.advancedsinks.find(s => s.name === 'Element.outerHTML')?.enabled) hookProp(Element, 'outerHTML');
-		if (CONFIG.advancedsinks.find(s => s.name === 'document.domain')?.enabled) hookProp(Document, 'domain');
-		if (CONFIG.advancedsinks.find(s => s.name === 'HTMLStyleElement.innerHTML')?.enabled) hookProp(HTMLStyleElement, 'innerHTML');
-		if (CONFIG.advancedsinks.find(s => s.name === 'CSSStyleSheet.cssText')?.enabled) hookProp(CSSStyleSheet, 'cssText');
+		if (CONFIG.advancedSinks.find(s => s.name === 'ShadowRoot.innerHTML')?.enabled) hookProp(ShadowRoot, 'innerHTML');
+		if (CONFIG.advancedSinks.find(s => s.name === 'Element.insertAdjacentHTML')?.enabled) hookMethod(Element.prototype, 'insertAdjacentHTML');
+		if (CONFIG.advancedSinks.find(s => s.name === 'Range.createContextualFragment')?.enabled) hookMethod(Range.prototype, 'createContextualFragment');
+		if (CONFIG.advancedSinks.find(s => s.name === 'Document.implementation.createHTMLDocument')?.enabled) hookMethod(Document.implementation, 'createHTMLDocument');
+		if (CONFIG.advancedSinks.find(s => s.name === 'HTMLIFrameElement.srcdoc')?.enabled) hookProp(HTMLIFrameElement, 'srcdoc');
+		if (CONFIG.advancedSinks.find(s => s.name === 'Element.outerHTML')?.enabled) hookProp(Element, 'outerHTML');
+		if (CONFIG.advancedSinks.find(s => s.name === 'document.domain')?.enabled) hookProp(Document, 'domain');
+		if (CONFIG.advancedSinks.find(s => s.name === 'HTMLStyleElement.innerHTML')?.enabled) hookProp(HTMLStyleElement, 'innerHTML');
+		if (CONFIG.advancedSinks.find(s => s.name === 'CSSStyleSheet.cssText')?.enabled) hookProp(CSSStyleSheet, 'cssText');
 
-		if (CONFIG.advancedsinks.find(s => s.name === 'javascript-urls')?.enabled) {
+		if (CONFIG.advancedSinks.find(s => s.name === 'javascript-urls')?.enabled) {
 			hookDangerousUrlScheme(HTMLAnchorElement, 'href');
 			hookDangerousUrlScheme(HTMLLinkElement, 'href');
 			hookDangerousUrlScheme(HTMLScriptElement, 'src');
 			hookDangerousUrlScheme(HTMLImageElement, 'src');
 		}
 
-		if (CONFIG.advancedsinks.find(s => s.name === 'DOMParser.parseFromString')?.enabled) {
+		if (CONFIG.advancedSinks.find(s => s.name === 'DOMParser.parseFromString')?.enabled) {
 			try {
 				if (DOMParser.prototype.parseFromString) {
 					const originalMethod = DOMParser.prototype.parseFromString;
