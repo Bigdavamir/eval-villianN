@@ -129,7 +129,7 @@ async function getFullConfig() {
 }
 
 async function broadcastConfig() {
-    const config = await getFullConfig();
+    const [config, _match] = await getConfigForRegister();
     const tabs = await browser.tabs.query({});
     for (const tab of tabs) {
       try {
