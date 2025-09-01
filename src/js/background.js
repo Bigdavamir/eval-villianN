@@ -42,11 +42,11 @@ const defaultConfig = {
 		{ "name" : "sinker", "enabled" : false, "pattern" : "evSinker" },
 		{ "name" : "sourcer", "enabled" : false, "pattern" : "evSourcer" }
 	],
-	"powerFeatures": [
+	"powerfeatures": [
 		{ "name": "autoSourceFetch", "pretty": "Auto-Source Fetch/XHR Responses", "enabled": false },
 		{ "name": "autoSourcePostMessage", "pretty": "Auto-Source postMessage Data", "enabled": false }
 	],
-	"advancedSinks": [
+	"advancedsinks": [
 		{ "name": "ShadowRoot.innerHTML", "enabled": true, "pattern": "set(ShadowRoot.innerHTML)" },
 		{ "name": "Element.insertAdjacentHTML", "enabled": true, "pattern": "Element.prototype.insertAdjacentHTML" },
 		{ "name": "Range.createContextualFragment", "enabled": true, "pattern": "Range.prototype.createContextualFragment" },
@@ -134,9 +134,11 @@ async function getConfigForRegister() {
 		delete tmp.name;
 	}
 	config.globals = dbconf.globals;
-	config.powerFeatures = dbconf.powerFeatures;
-	const functions = [...dbconf.functions, ...dbconf.advancedSinks];
-	config.functions = functions
+	config.powerfeatures = dbconf.powerfeatures;
+
+	// Unify functions and advancedsinks for hooking
+	const functionsToHook = [...dbconf.functions, ...dbconf.advancedsinks];
+	config.functions = functionsToHook
 		.filter(x => x.enabled)
 		.map(x => x.pattern);
 
@@ -164,7 +166,7 @@ async function getConfigForRegister() {
 
 async function register() {
 	if (unreg != null) {
-		await removeScript(false);
+		return;
 	}
 	const [config, match] = await getConfigForRegister();
 	if (config.functions.length === 0) {
@@ -214,7 +216,6 @@ function handleMessage(request, sender, sendResponse) {
 		case "getInitStatus":
 			return Promise.resolve(isInitialized);
         case "backgroundReady":
-            // This is a signal from us, ignore.
             return;
 		case "on?":
 			return Promise.resolve(!!unreg);
@@ -267,11 +268,18 @@ browser.runtime.onInstalled.addListener(async (details) => {
 		debugLog("First-time install detected.");
 		await browser.storage.local.clear();
 		await browser.storage.local.set({ 'evalVillainActive': true });
+		await initialize();
 	}
 });
 
-// Main entry point for the background script
-initialize().catch(console.error);
+(async () => {
+    const { evalVillainActive } = await browser.storage.local.get('evalVillainActive');
+	if (evalVillainActive === undefined) {
+		debugLog("No active flag found, performing first-time setup.");
+		await browser.storage.local.set({ 'evalVillainActive': true });
+	}
+	await initialize();
+})();
 
 browser.runtime.onMessage.addListener(handleMessage);
 browser.commands.onCommand.addListener(command => {

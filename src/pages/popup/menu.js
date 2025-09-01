@@ -1,7 +1,6 @@
 var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures", "advancedsinks"];
 
 // --- Start of bkg_api.js content ---
-// This is included here to simplify file management, as it's only used by the popup.
 function amIOn() {
     return browser.runtime.sendMessage({type: "on?"});
 }
@@ -34,7 +33,6 @@ async function update_if_on() {
 	    updateToggle(on);
     } catch (e) {
         console.error("Failed to check extension status:", e);
-        // Fallback to a disabled state
         updateToggle(false);
         const main = document.getElementById("main-content");
         const status = document.getElementById("status-message");
@@ -74,7 +72,8 @@ function createCheckBox(name, checked, subMenu) {
 }
 
 async function getSections() {
-	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats", "powerFeatures", "advancedSinks"]);
+	const keys = ["targets", "needles", "blacklist", "functions", "types", "formats", "powerfeatures", "advancedsinks"];
+	const all = await browser.storage.local.get(keys);
 	const autoOpen = [];
 	const onOff = [];
 	if (all.formats && Array.isArray(all.formats)) {
@@ -106,6 +105,11 @@ async function populateSubMenus() {
 		}
 
 		var where = document.getElementById(`${sub}-sub`);
+		// This was the site of the crash. If `where` is null, something is wrong.
+		if (!where) {
+			console.error(`Could not find element with ID: ${sub}-sub`);
+			continue;
+		}
 		for (let itr of res[sub]) {
 			if (typeof(itr.enabled) === 'boolean') {
 				const displayName = itr.pretty || itr.name;
@@ -238,7 +242,6 @@ async function main() {
         if (isReady) {
             await readyPopup();
         } else {
-            // Background script is not ready yet, wait for the signal
             browser.runtime.onMessage.addListener(async (message) => {
                 if (message.type === "backgroundReady") {
                     await readyPopup();
@@ -246,7 +249,6 @@ async function main() {
             });
         }
     } catch (e) {
-        // This can happen if the background script is not available at all
         console.error("Error communicating with background script:", e);
         const status = document.getElementById("status-message");
         status.innerText = "Error: Could not connect to extension background. Please try reloading the extension.";
