@@ -1,27 +1,22 @@
-// Mock the browser API that background.js uses
-// This MUST be defined before require('../src/js/background.js')
+// Define a minimal config to satisfy the background script's import-time execution.
+const mockDefaultConfig = {
+    functions: [], blacklist: [], needles: [], targets: [], types: [],
+    globals: [], powerFeatures: [], advancedSinks: [], formats: []
+};
+
+// Mock the browser API. This MUST be defined before the background script is required.
 global.browser = {
-  commands: {
-    onCommand: {
-      addListener: jest.fn(),
-    },
-  },
+  commands: { onCommand: { addListener: jest.fn() } },
   runtime: {
-    onMessage: {
-      addListener: jest.fn(),
-    },
-    onInstalled: {
-      addListener: jest.fn(),
-    },
-    onStartup: {
-        addListener: jest.fn(),
-    },
+    onMessage: { addListener: jest.fn() },
+    onInstalled: { addListener: jest.fn() },
+    onStartup: { addListener: jest.fn() },
     getURL: jest.fn(path => `moz-extension://<uuid>${path}`),
     sendMessage: jest.fn().mockResolvedValue(),
   },
   storage: {
     local: {
-      get: jest.fn().mockResolvedValue({ evalVillainActive: true }),
+      get: jest.fn().mockResolvedValue(mockDefaultConfig),
       set: jest.fn().mockResolvedValue(),
       clear: jest.fn().mockResolvedValue(),
     },
@@ -37,23 +32,11 @@ global.browser = {
   }
 };
 
-// Now we can require the background script.
-const { arraysEqual, defaultConfig } = require('../src/js/background.js');
-
-// We need to mock the implementation of 'get' again here because the
-// background script will have been loaded and the mock above will have been
-// used. For the actual tests, we want to return the full defaultConfig.
-browser.storage.local.get.mockImplementation(keys => {
-    if (Array.isArray(keys) && keys.includes('evalVillainActive')) {
-        return Promise.resolve({ evalVillainActive: true });
-    }
-    return Promise.resolve(defaultConfig);
-});
-
+// Now that the mock is defined, we can safely require the background script.
+const { arraysEqual } = require('../src/js/background.js');
 
 describe('arraysEqual', () => {
     beforeEach(() => {
-        // Clear mock history before each test
         jest.clearAllMocks();
     });
 
