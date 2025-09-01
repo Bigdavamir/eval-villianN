@@ -1,4 +1,5 @@
 // Mock the browser API that background.js uses
+// This MUST be defined before require('../src/js/background.js')
 global.browser = {
   commands: {
     onCommand: {
@@ -19,7 +20,9 @@ global.browser = {
   },
   storage: {
     local: {
-      get: jest.fn().mockResolvedValue({}),
+      // We need to provide a default value for the get call,
+      // otherwise the startup sequence in background.js will fail.
+      get: jest.fn().mockResolvedValue({ evalVillainActive: true }),
       set: jest.fn().mockResolvedValue(),
       clear: jest.fn().mockResolvedValue(),
     },
@@ -35,7 +38,14 @@ global.browser = {
   }
 };
 
-const { arraysEqual } = require('../src/js/background.js');
+// Now we can require the background script.
+const { arraysEqual, defaultConfig } = require('../src/js/background.js');
+
+// We need to mock the implementation of 'get' again here because the
+// background script will have been loaded and the mock above will have been
+// used. For the actual tests, we want to return the full defaultConfig.
+browser.storage.local.get.mockResolvedValue(defaultConfig);
+
 
 describe('arraysEqual', () => {
     beforeEach(() => {
