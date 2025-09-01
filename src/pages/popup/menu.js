@@ -1,4 +1,4 @@
-var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerFeatures", "advancedSinks"];
+var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures", "advancedsinks"];
 
 // --- Start of bkg_api.js content ---
 // This is included here to simplify file management, as it's only used by the popup.
@@ -186,12 +186,14 @@ function listener(ev) {
 		return
 	}
 
-	if (["h1-functions", "h1-targets", "h1-enable",	"h1-autoOpen", "h1-onOff", "h1-blacklist",	"h1-needles", "h1-types", "h1-powerfeatures", "h1-advancedsinks", "h1-timeline"].includes(id)) {
-		let sub = id.substr(3);
-		let formats = document.getElementById(sub);
-		formats.classList.toggle('closed');
-		formats.classList.toggle('open');
-		return
+	if (id.startsWith("h1-")) {
+		const sub = id.substring(3);
+		const element = document.getElementById(sub);
+		if (element) {
+			element.classList.toggle('closed');
+			element.classList.toggle('open');
+		}
+		return;
 	}
 	if (id == "h1-config" ) {
 		goToConfig();
