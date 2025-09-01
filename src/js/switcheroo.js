@@ -27,29 +27,39 @@ function makeid() {
  * Everything above is what will be injected
 */
 function inject_it(func, info) {
-	const checkId = `data-${makeid()}`; // document gets a head.div with id checkId on success
+	const checkId = `data-${makeid()}`;
 
-	func = func.toString();
-	info["checkId"] = checkId;
-	const inject = `(${func})(${JSON.stringify(info)});`;
+	// The rewriter script (`func`) is wrapped in an IIFE. We prepend a line to this
+	// function that sets an attribute on the document root. If this attribute
+	// is present after injection, we know the script executed. If not, a CSP
+	// or other mechanism likely blocked it.
+	const rewriterScript = func.toString();
+	const injectionPayload = `
+		document.documentElement.setAttribute('${checkId}', '1');
+		window.EVAL_VILLAIN_CONFIG = ${JSON.stringify(info)};
+		(${rewriterScript})();
+	`;
 
-	const s = document.createElement('script');
-	s.type = "text/javascript";
-	s.onload = () => this.remove(); // Keep dom clean
-	s.innerHTML = inject; // yeah, it's ironic
-	document.documentElement.appendChild(s);
+	const scriptEl = document.createElement('script');
+	scriptEl.type = "text/javascript";
+	scriptEl.innerHTML = injectionPayload;
+	document.documentElement.appendChild(scriptEl);
+	scriptEl.remove(); // Remove the script element from the DOM immediately after appending.
 
-	// If rewriter executes, checkId will be set. Otherwise CSP probably blocked
-	if (!s.hasAttribute(checkId)) {
-		console.log("%c[ERROR]%c EV failed to load on %c%s%c",
-			config.formats.interesting.default,
-			config.formats.interesting.highlight,
-			config.formats.interesting.default,
-			document.location.href,
-			config.formats.interesting.highlight
-		);
-		s.remove();
-	}
+	// After a short delay, check if the attribute was successfully set.
+	setTimeout(() => {
+		if (!document.documentElement.hasAttribute(checkId)) {
+			// The script likely did not execute.
+			console.log(
+				"%c[EV-ERROR]%c Eval Villain injection failed, likely due to the page's Content Security Policy (CSP).",
+				"color:red;font-weight:bold;", "color:red;"
+			);
+			// Notify the background script to update the UI.
+			browser.runtime.sendMessage({ type: "csp-injection-failed" });
+		}
+		// Clean up the attribute from the DOM regardless of success or failure.
+		document.documentElement.removeAttribute(checkId);
+	}, 100);
 }
 
 // config and rewriter should be put into this by the background script
