@@ -225,19 +225,21 @@ async function main() {
     showLoading();
     document.addEventListener("click", listener);
 
+    const readyPopup = async () => {
+        await update_if_on();
+        await populateSubMenus();
+        showContent();
+    };
+
     try {
         const isReady = await browser.runtime.sendMessage({type: "getInitStatus"});
         if (isReady) {
-            await update_if_on();
-            await populateSubMenus();
-            showContent();
+            await readyPopup();
         } else {
             // Background script is not ready yet, wait for the signal
             browser.runtime.onMessage.addListener(async (message) => {
                 if (message.type === "backgroundReady") {
-                    await update_if_on();
-                    await populateSubMenus();
-                    showContent();
+                    await readyPopup();
                 }
             });
         }
