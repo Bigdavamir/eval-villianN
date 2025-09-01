@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const timelineContainer = document.getElementById('timeline-container');
     const refreshBtn = document.getElementById('refresh-btn');
     const clearBtn = document.getElementById('clear-btn');
+    const viewGraphBtn = document.getElementById('view-graph-btn');
 
     const EV_TIMELINE_KEY = 'evalvillain_timeline';
 
@@ -91,4 +92,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial load
     loadTimeline();
+
+    viewGraphBtn.addEventListener('click', () => {
+        browser.tabs.create({ url: '../graph/graph.html' });
+    });
+
+    function handleTimelineClick(event) {
+        const clickedEl = event.target.closest('.timeline-event');
+        if (!clickedEl) return;
+
+        // Clear previous highlights
+        document.querySelectorAll('.timeline-event.highlight').forEach(el => {
+            el.classList.remove('highlight');
+        });
+
+        const clickedId = clickedEl.id;
+        clickedEl.classList.add('highlight');
+
+        if (clickedEl.classList.contains('event-sink')) {
+            // A sink was clicked, highlight its sources
+            const sourceIds = clickedEl.dataset.sourceIds;
+            if (sourceIds) {
+                sourceIds.split(' ').forEach(id => {
+                    document.getElementById(id)?.classList.add('highlight');
+                });
+            }
+        } else if (clickedEl.classList.contains('event-source')) {
+            // A source was clicked, highlight sinks that contain it
+            document.querySelectorAll('.event-sink').forEach(sinkEl => {
+                const sourceIds = sinkEl.dataset.sourceIds;
+                if (sourceIds && sourceIds.split(' ').includes(clickedId)) {
+                    sinkEl.classList.add('highlight');
+                }
+            });
+        }
+    }
+
+    timelineContainer.addEventListener('click', handleTimelineClick);
 });
