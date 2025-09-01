@@ -1,8 +1,24 @@
-var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerfeatures", "advancedSinks"];
+var configList = ["targets", "needles", "blacklist", "functions", "autoOpen", "onOff", "types", "powerFeatures", "advancedSinks"];
+
+// --- Start of bkg_api.js content ---
+// This is included here to simplify file management, as it's only used by the popup.
+function amIOn() {
+    return browser.runtime.sendMessage({type: "on?"});
+}
+
+function toggleBackground() {
+    return browser.runtime.sendMessage({type: "toggle"});
+}
+
+function updateBackground() {
+    return browser.runtime.sendMessage({type: "updated"});
+}
+// --- End of bkg_api.js content ---
+
 
 function updateToggle(on) {
 	if (typeof(on) !== "boolean") {
-		console.error("unexpected message type");
+		console.error("unexpected message type in updateToggle");
 		return;
 	}
 	let d = document.getElementById("toggle");
@@ -13,8 +29,19 @@ function updateToggle(on) {
 }
 
 async function update_if_on() {
-	const on = await amIOn();
-	updateToggle(on);
+	try {
+        const on = await amIOn();
+	    updateToggle(on);
+    } catch (e) {
+        console.error("Failed to check extension status:", e);
+        // Fallback to a disabled state
+        updateToggle(false);
+        const main = document.getElementById("main-content");
+        const status = document.getElementById("status-message");
+        main.classList.add("hidden");
+        status.innerText = "Error! Could not connect to background script.";
+        status.classList.remove("hidden");
+    }
 }
 
 function createCheckBox(name, checked, subMenu) {
@@ -50,18 +77,20 @@ async function getSections() {
 	const all = await browser.storage.local.get(["targets", "needles", "blacklist", "functions", "types", "formats", "powerFeatures", "advancedSinks"]);
 	const autoOpen = [];
 	const onOff = [];
-	for (let k of all.formats) {
-		autoOpen.push({
-			name: k.pretty,
-			pattern: k.name,
-			enabled: k.open,
-		});
-		onOff.push({
-			name: k.pretty,
-			pattern: k.name,
-			enabled: k.use,
-		});
-	}
+	if (all.formats && Array.isArray(all.formats)) {
+        for (let k of all.formats) {
+            autoOpen.push({
+                name: k.pretty,
+                pattern: k.name,
+                enabled: k.open,
+            });
+            onOff.push({
+                name: k.pretty,
+                pattern: k.name,
+                enabled: k.use,
+            });
+        }
+    }
 	all.autoOpen = autoOpen;
 	all.onOff = onOff;
 	delete all.formats;
@@ -72,7 +101,7 @@ async function populateSubMenus() {
 	const res = await getSections();
 	for (let sub of configList) {
 		if (!res[sub]) {
-			console.error("Could not get: " + sub);
+			console.error("Could not get: " + sub + " from storage.");
 			continue;
 		}
 
@@ -81,7 +110,6 @@ async function populateSubMenus() {
 			if (typeof(itr.enabled) === 'boolean') {
 				const displayName = itr.pretty || itr.name;
 				const inpt = createCheckBox(displayName, itr.enabled, sub);
-				// The ID for the checkbox needs to be the internal name for saving, not the pretty name
 				if (itr.pretty) {
 					inpt.querySelector('input').id = itr.name;
 				}
@@ -182,6 +210,43 @@ function goToConfig() {
 		return;
 }
 
-update_if_on();
-document.addEventListener("click", listener);
-populateSubMenus();
+function showContent() {
+    document.getElementById("status-message").classList.add("hidden");
+    document.getElementById("main-content").classList.remove("hidden");
+}
+
+function showLoading() {
+    document.getElementById("main-content").classList.add("hidden");
+    document.getElementById("status-message").innerText = "Initializing...";
+    document.getElementById("status-message").classList.remove("hidden");
+}
+
+async function main() {
+    showLoading();
+    document.addEventListener("click", listener);
+
+    try {
+        const isReady = await browser.runtime.sendMessage({type: "getInitStatus"});
+        if (isReady) {
+            await update_if_on();
+            await populateSubMenus();
+            showContent();
+        } else {
+            // Background script is not ready yet, wait for the signal
+            browser.runtime.onMessage.addListener(async (message) => {
+                if (message.type === "backgroundReady") {
+                    await update_if_on();
+                    await populateSubMenus();
+                    showContent();
+                }
+            });
+        }
+    } catch (e) {
+        // This can happen if the background script is not available at all
+        console.error("Error communicating with background script:", e);
+        const status = document.getElementById("status-message");
+        status.innerText = "Error: Could not connect to extension background. Please try reloading the extension.";
+    }
+}
+
+main();
