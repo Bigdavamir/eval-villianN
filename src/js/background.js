@@ -484,22 +484,41 @@ browser.commands.onCommand.addListener(function(command) {
 	if (command == "toggle") toggleEV();
 });
 
-function handleMessage(request, _sender, _sendResponse) {
-	if (request === "on?") {
-		return new Promise(res => res(this.unreg ? true: false));
-	} else if (request === "toggle") {
-		return toggleEV();
-	} else if (request === "updated") {
-		if (this.unreg) {
-			return register();
-		} else {
-			return new Promise(res => res(false));
-		}
-	} else if (request === "getScriptInfo") {
-		return getConfigForRegister();
-	} else {
-		const er = `unkown msg: ${request}`;
-		console.error(er);
+function handleMessage(request, sender, _sendResponse) {
+	const requestStr = typeof request === 'string' ? request : request.type;
+
+	switch (requestStr) {
+		case "on?":
+			return Promise.resolve(!!this.unreg);
+		case "toggle":
+			return toggleEV();
+		case "updated":
+			if (this.unreg) {
+				return register();
+			}
+			return Promise.resolve(false);
+		case "getScriptInfo":
+			// The new switcheroo script only needs the config object.
+			// The matches are handled by the register function.
+			return getConfigForRegister().then(([config, _match]) => config);
+		case "csp-injection-failed":
+			if (sender.tab) {
+				const tabId = sender.tab.id;
+				browser.browserAction.setTitle({
+					tabId: tabId,
+					title: "Eval Villain: Injection BLOCKED by page CSP"
+				});
+				browser.browserAction.setIcon({
+					tabId: tabId,
+					path: "/extra_icons/on_48_red.png"
+				});
+			}
+			return; // No response needed
+		default:
+			const er = `Unknown message received: ${JSON.stringify(request)}`;
+			console.error(er);
+			// Optionally return a rejection to inform the sender
+			return Promise.reject(new Error(er));
 	}
 }
 
