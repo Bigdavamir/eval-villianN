@@ -867,7 +867,7 @@ function getInterest(argObj, intrBundle) {
 		}
 	}
 
-	function hookFrameworks() {
+	function hookAdvancedSinks() {
 		const sourcerName = CONFIG.sourcerName;
 		const sourcer = window[sourcerName];
 
@@ -918,24 +918,26 @@ function getInterest(argObj, intrBundle) {
 			} catch (e) { real.warn(`[EV] Failed to hook ${proto.name}.prototype.${prop}:`, e); }
 		};
 
-		if (CONFIG.advancedSinks.find(s => s.name === 'shadowRoot')?.enabled) hookProp(ShadowRoot, 'innerHTML');
-		if (CONFIG.advancedSinks.find(s => s.name === 'insertAdjacentHTML')?.enabled) hookMethod(Element, 'insertAdjacentHTML');
-		if (CONFIG.advancedSinks.find(s => s.name === 'rangeCreateContextualFragment')?.enabled) hookMethod(Range, 'createContextualFragment');
-		if (CONFIG.advancedSinks.find(s => s.name === 'createHTMLDocument')?.enabled) hookMethod(Document.implementation, 'createHTMLDocument');
-		if (CONFIG.advancedSinks.find(s => s.name === 'iframeSrcdoc')?.enabled) hookProp(HTMLIFrameElement, 'srcdoc');
-		if (CONFIG.advancedSinks.find(s => s.name === 'elementOuterHTML')?.enabled) hookProp(Element, 'outerHTML');
-		if (CONFIG.advancedSinks.find(s => s.name === 'documentDomain')?.enabled) hookProp(Document, 'domain');
-		if (CONFIG.advancedSinks.find(s => s.name === 'styleInnerHTML')?.enabled) hookProp(HTMLStyleElement, 'innerHTML');
-		if (CONFIG.advancedSinks.find(s => s.name === 'cssText')?.enabled) hookProp(CSSStyleSheet, 'cssText');
+		if (!CONFIG.advancedsinks) return;
 
-		if (CONFIG.advancedSinks.find(s => s.name === 'dangerousProtocols')?.enabled) {
+		if (CONFIG.advancedsinks.find(s => s.name === 'ShadowRoot.innerHTML')?.enabled) hookProp(ShadowRoot, 'innerHTML');
+		if (CONFIG.advancedsinks.find(s => s.name === 'Element.insertAdjacentHTML')?.enabled) hookMethod(Element.prototype, 'insertAdjacentHTML');
+		if (CONFIG.advancedsinks.find(s => s.name === 'Range.createContextualFragment')?.enabled) hookMethod(Range.prototype, 'createContextualFragment');
+		if (CONFIG.advancedsinks.find(s => s.name === 'Document.implementation.createHTMLDocument')?.enabled) hookMethod(Document.implementation, 'createHTMLDocument');
+		if (CONFIG.advancedsinks.find(s => s.name === 'HTMLIFrameElement.srcdoc')?.enabled) hookProp(HTMLIFrameElement, 'srcdoc');
+		if (CONFIG.advancedsinks.find(s => s.name === 'Element.outerHTML')?.enabled) hookProp(Element, 'outerHTML');
+		if (CONFIG.advancedsinks.find(s => s.name === 'document.domain')?.enabled) hookProp(Document, 'domain');
+		if (CONFIG.advancedsinks.find(s => s.name === 'HTMLStyleElement.innerHTML')?.enabled) hookProp(HTMLStyleElement, 'innerHTML');
+		if (CONFIG.advancedsinks.find(s => s.name === 'CSSStyleSheet.cssText')?.enabled) hookProp(CSSStyleSheet, 'cssText');
+
+		if (CONFIG.advancedsinks.find(s => s.name === 'javascript-urls')?.enabled) {
 			hookDangerousUrlScheme(HTMLAnchorElement, 'href');
 			hookDangerousUrlScheme(HTMLLinkElement, 'href');
 			hookDangerousUrlScheme(HTMLScriptElement, 'src');
 			hookDangerousUrlScheme(HTMLImageElement, 'src');
 		}
 
-		if (CONFIG.advancedSinks.find(s => s.name === 'domParser')?.enabled) {
+		if (CONFIG.advancedsinks.find(s => s.name === 'DOMParser.parseFromString')?.enabled) {
 			try {
 				if (DOMParser.prototype.parseFromString) {
 					const originalMethod = DOMParser.prototype.parseFromString;
@@ -1361,7 +1363,7 @@ function getInterest(argObj, intrBundle) {
 		}
 	}
 
-	try { hookFrameworks(); } catch (e) { real.error("[EV] Error during FrameworkSinkHooks init:", e); }
+	try { hookAdvancedSinks(); } catch (e) { real.error("[EV] Error during FrameworkSinkHooks init:", e); }
 	try { setupCommunicationBridges(); } catch (e) { real.error("[EV] Error during IframeAndSWBridge init:", e); }
 	try { setupPassiveInputListener(); } catch (e) { real.error("[EV] Error during PassiveInputListener init:", e); }
 

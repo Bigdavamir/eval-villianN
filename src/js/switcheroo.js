@@ -77,4 +77,26 @@
     }
 
     main();
+
+    browser.runtime.onMessage.addListener(async (message, sender) => {
+        if (message.type === "configUpdate") {
+            console.log("[EV] Config update received, re-injecting rewriter.");
+            try {
+                const [config, rewriterResponse] = await Promise.all([
+                    browser.runtime.sendMessage("getScriptInfo"),
+                    fetch(browser.runtime.getURL('/js/rewriter.js'))
+                ]);
+
+                if (!rewriterResponse.ok) {
+                    throw new Error(`Failed to fetch rewriter.js: ${rewriterResponse.statusText}`);
+                }
+
+                const rewriterSource = await rewriterResponse.text();
+
+                inject_it(rewriterSource, config);
+            } catch (error) {
+                console.error("Eval Villain re-injection failed:", error);
+            }
+        }
+    });
 })();
