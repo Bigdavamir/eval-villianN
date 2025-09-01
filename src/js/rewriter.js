@@ -1057,6 +1057,49 @@ function getInterest(argObj, intrBundle) {
 		} catch(e) { real.warn('[EV] Failed to hook Angular:', e); }
 	}
 
+	function hookJQuerySinks() {
+		if (typeof window.jQuery !== 'function') {
+			return; // jQuery not found, do nothing.
+		}
+
+		const $ = window.jQuery;
+		const methodsToHook = ['html', 'append', 'prepend', 'before', 'after'];
+
+		methodsToHook.forEach(methodName => {
+			try {
+				const originalMethod = $.fn[methodName];
+				if (typeof originalMethod !== 'function') return;
+
+				$.fn[methodName] = new Proxy(originalMethod, {
+					apply: function(target, thisArg, args) {
+						if (args.length > 0) {
+							EvalVillainHook(INTRBUNDLE, `jQuery.${methodName}`, args);
+						}
+						return Reflect.apply(target, thisArg, args);
+					}
+				});
+			} catch (e) {
+				real.warn(`[EV] Failed to hook jQuery.${methodName}:`, e);
+			}
+		});
+
+		try {
+			const originalParseHTML = $.parseHTML;
+			if (typeof originalParseHTML !== 'function') return;
+
+			$.parseHTML = new Proxy(originalParseHTML, {
+				apply: function(target, thisArg, args) {
+					if (args.length > 0) {
+						EvalVillainHook(INTRBUNDLE, 'jQuery.parseHTML', args);
+					}
+					return Reflect.apply(target, thisArg, args);
+				}
+			});
+		} catch (e) {
+			real.warn('[EV] Failed to hook jQuery.parseHTML:', e);
+		}
+	}
+
 	function setupCommunicationBridges() {
 		function applyToFrame(frameWindow) {
 			function getFuncInFrame(n) {

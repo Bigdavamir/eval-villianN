@@ -50,6 +50,18 @@ const defaultConfig = {
 			"enabled" : true,
 			"pattern" : "value(XMLHttpRequest.open)"
 		}, {
+			"name": "window.open",
+			"enabled": true,
+			"pattern": "window.open"
+		}, {
+			"name": "Location.assign",
+			"enabled": true,
+			"pattern": "value(Location.assign)"
+		}, {
+			"name": "Location.replace",
+			"enabled": true,
+			"pattern": "value(Location.replace)"
+		}, {
 			"name" : "URLSearchParams.get",
 			"enabled" : false,
 			"pattern" : "value(URLSearchParams.get)"
