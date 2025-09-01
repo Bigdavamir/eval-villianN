@@ -1,4 +1,4 @@
-const configList = ["targets", "needles",  "blacklist", "functions", "globals", "types", "powerfeatures", "advancedSinks"];
+const configList = ["targets", "needles",  "blacklist", "functions", "globals", "types", "powerFeatures", "advancedSinks"];
 const normalHeaders = ["enabled", "name", "pattern"];
 
 function getTableData(tblName) {
@@ -180,7 +180,7 @@ async function saveTable(tblName) {
 	const form = document.getElementById(`${tblName}-form`);
 	let dataToSave;
 
-	if (["types", "powerfeatures", "advancedSinks"].includes(tblName)) {
+	if (["types", "powerFeatures", "advancedSinks"].includes(tblName)) {
 		const currentData = await browser.storage.local.get(tblName);
 		const toggledData = getTwoColumnElements(form);
 
@@ -215,7 +215,7 @@ function onLoad() {
 				continue;
 			}
 			for (const itr of res[sub]) {
-				if (["types", "powerfeatures", "advancedSinks"].includes(sub)) {
+				if (["types", "powerFeatures", "advancedSinks"].includes(sub)) {
 					addTwoColumnRow(sub, itr);
 				} else {
 					addThreeColumnRow(sub, itr);
@@ -229,7 +229,7 @@ function onLoad() {
 	}
 
 	for (const i of configList) {
-		const hasAddButton = !["globals", "types", "powerfeatures", "advancedSinks"].includes(i);
+		const hasAddButton = !["globals", "types", "powerFeatures", "advancedSinks"].includes(i);
 		if (hasAddButton) {
 			document.getElementById(`add-${i}`).onclick = () => {
 				appendDefault(i);
